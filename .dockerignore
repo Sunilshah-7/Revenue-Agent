@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+package-lock.json
+apps/*/node_modules
+apps/web
+apps/api/.env
+apps/web/.env
+apps/web/.env.local
+*.log

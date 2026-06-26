@@ -5,6 +5,10 @@
     "apps/*"
   ],
   "scripts": {
+    "build": "npm run build:api",
+    "build:api": "npm --workspace apps/api run typecheck",
+    "start": "npm run start:api",
+    "start:api": "bun --cwd apps/api run start",
     "dev:web": "bun --cwd apps/web run dev",
     "dev:api": "bun --cwd apps/api run dev",
     "dev": "echo 'Run dev:api and dev:web in separate terminals'",
