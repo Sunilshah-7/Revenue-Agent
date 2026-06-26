@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { Navbar } from "../components/ui/Navbar";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Revenue Agent Platform",
+  title: "ARAP",
   description: "Automated revenue research and business-case generation",
 };
 
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-bg-base font-sans text-text-primary antialiased">
+        <Navbar />
+        {children}
+      </body>
     </html>
   );
 }
