@@ -7,17 +7,13 @@ import {
   BookOpen,
   ChevronDown,
   LayoutDashboard,
-  Play,
   Search,
-  Settings,
   Sparkles,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Playbooks", href: "/playbooks", icon: BookOpen },
-  { label: "Sessions", href: "/sessions", icon: Play },
-  { label: "Settings", href: "/settings", icon: Settings },
 ] as const;
 
 export function Navbar() {
