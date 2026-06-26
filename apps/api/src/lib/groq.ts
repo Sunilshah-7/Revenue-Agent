@@ -7,10 +7,6 @@ type ChatMessage = {
   content: string;
 };
 
-interface EmbeddingResponse {
-  data: Array<{ embedding: number[] }>;
-}
-
 interface ChatCompletionResponse {
   choices: Array<{
     message: {
@@ -43,18 +39,6 @@ async function groqRequest<T>(path: string, body: unknown): Promise<T> {
   }
 
   return (await response.json()) as T;
-}
-
-export async function createEmbeddings(
-  input: string | string[],
-): Promise<number[][]> {
-  const payload = {
-    model: "nomic-embed-text-v1.5",
-    input,
-  };
-
-  const result = await groqRequest<EmbeddingResponse>("/embeddings", payload);
-  return result.data.map((d) => d.embedding);
 }
 
 export async function createCompletion(

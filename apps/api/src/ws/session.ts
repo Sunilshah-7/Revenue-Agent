@@ -8,6 +8,7 @@ type SessionSocket = {
 
 const sessionSockets = new Map<string, Set<SessionSocket>>();
 let bridgeInitialized = false;
+const BRIDGE_STARTUP_TIMEOUT_MS = 15_000;
 
 function parseSessionId(channel: string): string | null {
   const parts = channel.split(":");
@@ -22,7 +23,20 @@ export async function initializeSessionEventBridge(): Promise<void> {
     return;
   }
 
-  await redisSubscriber.psubscribe("session:*");
+  logger.info("Initializing WebSocket Redis event bridge");
+
+  await Promise.race([
+    redisSubscriber.psubscribe("session:*"),
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => {
+        reject(
+          new Error(
+            "Timed out connecting to Redis pub/sub. Check REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, and REDIS_TLS.",
+          ),
+        );
+      }, BRIDGE_STARTUP_TIMEOUT_MS);
+    }),
+  ]);
 
   redisSubscriber.on("pmessage", (_pattern, channel, message) => {
     const sessionId = parseSessionId(channel);

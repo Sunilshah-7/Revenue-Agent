@@ -28,7 +28,7 @@ A full-stack AI agent platform that automates revenue research, buyer engagement
 | Vector search       | pgvector (on Neon)                            |
 | Cache / queue store | Redis via Upstash                             |
 | LLM inference       | Groq — `llama-3.3-70b-versatile`              |
-| Embeddings          | Groq — `nomic-embed-text-v1.5`                |
+| Embeddings          | Local deterministic 768-dim hashing           |
 | Frontend deploy     | Vercel                                        |
 | Backend deploy      | Railway                                       |
 
@@ -146,7 +146,7 @@ CREATE TABLE sessions (
 
 1. Sign up at [console.groq.com](https://console.groq.com) — no credit card required.
 2. Navigate to API Keys → Create Key.
-3. Models used: `llama-3.3-70b-versatile` (chat), `nomic-embed-text-v1.5` (embeddings).
+3. Model used: `llama-3.3-70b-versatile` for chat completions. Embeddings are generated locally for the demo.
 
 ### 5. Configure environment variables
 
@@ -157,6 +157,7 @@ DATABASE_URL=postgresql://...      # Neon pooled connection string
 REDIS_HOST=your-db.upstash.io
 REDIS_PORT=6379
 REDIS_PASSWORD=your-upstash-password
+REDIS_TLS=true
 GROQ_API_KEY=gsk_...
 PORT=3001
 FRONTEND_URL=http://localhost:3000

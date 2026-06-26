@@ -1,0 +1,40 @@
+Revenue Playbook: Mid-Market SaaS Expansion
+
+Positioning:
+Lead with business outcomes, not features. The strongest message for mid-market SaaS companies is revenue efficiency: improving conversion rates, reducing manual sales work, and helping leadership forecast pipeline with more confidence.
+
+Target Buyer:
+Primary buyers are VP Sales, CRO, RevOps leaders, and founders. They care about pipeline quality, rep productivity, sales cycle length, churn risk, and forecast accuracy.
+
+Discovery Questions:
+Ask how the team currently identifies high-intent accounts.
+Ask where sales reps lose the most time during prospect research.
+Ask how leadership measures revenue leakage across the funnel.
+Ask whether customer expansion signals are tracked consistently.
+
+Pain Points:
+Sales teams often spend too much time researching accounts manually.
+RevOps teams struggle to connect playbook guidance with live prospect context.
+Leadership lacks visibility into which opportunities are worth prioritizing.
+Messaging is inconsistent across reps, causing weaker buyer engagement.
+
+Value Drivers:
+Automated research can reduce manual account prep time by 40 percent.
+Grounded recommendations help reps use approved messaging from internal playbooks.
+A structured business case helps executives understand ROI faster.
+Real-time agent output can shorten the time from account selection to outreach.
+
+Objection Handling:
+If the buyer says they already use a CRM, explain that the platform complements CRM data by turning playbooks and prospect context into actionable sales guidance.
+If the buyer is worried about AI accuracy, emphasize retrieval-grounded responses from approved internal documents.
+If the buyer is concerned about adoption, recommend starting with one team and one high-value sales motion.
+
+Business Case Template:
+Executive Summary: Explain the revenue problem and why now.
+Opportunity: Identify the buyer segment, pain points, and potential impact.
+Risks: Call out adoption, data quality, and process-change risks.
+Proposed Actions: Start with playbook ingestion, pilot agent sessions, and measure rep time saved.
+Success Metrics: Track research time saved, opportunity conversion, sales cycle reduction, and pipeline influenced.
+
+Recommended Next Step:
+Run a pilot with five account executives using one sales playbook and ten target accounts. Compare research time, message quality, and manager feedback before and after the pilot.

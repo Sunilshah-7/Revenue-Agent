@@ -33,7 +33,7 @@ The architecture is split into two independently deployed services:
 - **Frontend** — Next.js `app/` router, deployed to Vercel
 - **Backend** — Hono + Elysia on Bun, deployed to Railway
 
-Both services share managed cloud data stores (Neon, Upstash) and call Groq's inference API for LLM completions and embeddings.
+Both services share managed cloud data stores (Neon, Upstash), call Groq's inference API for LLM completions, and generate local deterministic embeddings for the demo RAG index.
 
 ---
 
@@ -142,7 +142,7 @@ apps/api/
 │   │   ├── research.worker.ts  # RAG retrieval + Groq completion
 │   │   └── writer.worker.ts    # Business case generation
 │   ├── rag/
-│   │   ├── embed.ts            # Groq embedding calls (nomic-embed-text)
+│   │   ├── embed.ts            # Local deterministic 768-dim embeddings
 │   │   ├── retrieve.ts         # pgvector similarity search
 │   │   └── chunk.ts            # Text chunking (fixed-size + overlap)
 │   ├── db/
@@ -179,7 +179,7 @@ Hono /api/v1/documents
 
 BullMQ embed.worker
         │
-        ├── Call Groq embeddings API (nomic-embed-text-v1.5)
+        ├── Generate local 768-dim embeddings
         ├── Receive float[] vector (768 dims)
         └── INSERT INTO document_chunks (content, embedding, metadata)
             using pgvector
@@ -244,7 +244,7 @@ Document
 chunk(text, { size: 512, overlap: 64 })
    │ string[]
    ▼
-embed(chunks[]) → Groq nomic-embed-text-v1.5
+embed(chunks[]) → local deterministic 768-dim vectors
    │ number[][] (768-dim vectors)
    ▼
 pgvector INSERT
@@ -380,7 +380,7 @@ CREATE TABLE document_chunks (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   doc_id       UUID REFERENCES documents(id) ON DELETE CASCADE,
   content      TEXT NOT NULL,
-  embedding    vector(768),           -- nomic-embed-text-v1.5 output dim
+  embedding    vector(768),           -- local embedding dimension
   chunk_index  INTEGER NOT NULL,
   metadata     JSONB DEFAULT '{}'
 );
@@ -425,7 +425,7 @@ CREATE TABLE sessions (
                              ┌──────────▼──────────┐
                              │     Groq API         │
                              │  llama-3.3-70b       │
-                             │  nomic-embed-text    │
+                             │  chat completions    │
                              │   (Free tier)        │
                              └─────────────────────┘
 ```
@@ -450,6 +450,7 @@ DATABASE_URL=            # Neon connection string (pooled)
 REDIS_HOST=              # Upstash Redis endpoint
 REDIS_PORT=6379
 REDIS_PASSWORD=          # Upstash Redis password
+REDIS_TLS=true           # Upstash TCP Redis requires TLS
 GROQ_API_KEY=            # Groq API key (free tier)
 PORT=3001                # REST + WebSocket upgrade
 FRONTEND_URL=            # Vercel deployment URL (for CORS)
