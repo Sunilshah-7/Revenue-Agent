@@ -2,8 +2,7 @@
 
 A full-stack AI agent platform that automates revenue research, buyer engagement, and business-case generation. Built with Bun, Hono, Elysia, Next.js, PostgreSQL + pgvector, Redis, and BullMQ. Uses Groq's free-tier inference API (Llama 3.3 70B) — no paid LLM subscription required.
 
-**Live demo:** `[your-vercel-url]`  
-**Backend API:** `[your-railway-url]`
+**Live demo:** `https://revenue-agent-web.vercel.app/dashboard`
 
 ---
 
