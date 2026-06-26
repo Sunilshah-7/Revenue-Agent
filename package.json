@@ -1,0 +1,13 @@
+{
+  "name": "ai-revenue-agent",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:web": "bun --cwd apps/web run dev",
+    "dev:api": "bun --cwd apps/api run dev",
+    "dev": "echo 'Run dev:api and dev:web in separate terminals'",
+    "typecheck": "bun --cwd apps/api run typecheck && bun --cwd apps/web run typecheck"
+  }
+}
