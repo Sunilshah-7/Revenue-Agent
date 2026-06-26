@@ -67,7 +67,7 @@ ai-revenue-agent/
 │           ├── rag/
 │           ├── db/
 │           └── redis/
-├── ARCHITECTURE.md
+├── Architecture.md
 └── README.md
 ```
 
@@ -158,8 +158,7 @@ REDIS_HOST=your-db.upstash.io
 REDIS_PORT=6379
 REDIS_PASSWORD=your-upstash-password
 GROQ_API_KEY=gsk_...
-PORT=3000
-WS_PORT=3001
+PORT=3001
 FRONTEND_URL=http://localhost:3000
 ```
 
@@ -225,13 +224,14 @@ curl https://your-railway-url/health
 
 ## API Reference
 
-### REST (Hono — port 3000)
+### REST (Hono — port 3001)
 
 | Method | Path                   | Description                           |
 | ------ | ---------------------- | ------------------------------------- |
 | `GET`  | `/health`              | Health check                          |
 | `POST` | `/api/v1/documents`    | Upload and ingest a playbook document |
 | `GET`  | `/api/v1/documents`    | List all ingested documents           |
+| `GET`  | `/api/v1/sessions`     | List recent agent sessions            |
 | `POST` | `/api/v1/sessions`     | Start a new agent session             |
 | `GET`  | `/api/v1/sessions/:id` | Get session status and output         |
 | `POST` | `/api/v1/query`        | One-shot RAG query against playbooks  |
@@ -271,7 +271,7 @@ Everything in this stack has a free tier sufficient for demo and portfolio use.
 
 ## Architecture
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for a full breakdown of:
+See [Architecture.md](./Architecture.md) for a full breakdown of:
 
 - System topology diagram
 - RAG pipeline design

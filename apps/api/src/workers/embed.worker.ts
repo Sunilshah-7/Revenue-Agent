@@ -8,13 +8,14 @@ interface EmbedJobData {
   filename: string;
   chunk: string;
   chunkIndex: number;
+  pageHint: number | null;
 }
 
 export function startEmbedWorker(): Worker<EmbedJobData> {
   return new Worker<EmbedJobData>(
     "embed",
     async (job) => {
-      const { docId, filename, chunk, chunkIndex } = job.data;
+      const { docId, filename, chunk, chunkIndex, pageHint } = job.data;
       const [vector] = await embedText(chunk);
       const vectorLiteral = `[${vector.join(",")}]`;
 
@@ -28,7 +29,7 @@ export function startEmbedWorker(): Worker<EmbedJobData> {
           chunk,
           vectorLiteral,
           chunkIndex,
-          JSON.stringify({ docId, filename, chunkIndex }),
+          JSON.stringify({ docId, filename, pageHint, chunkIndex }),
         ],
       );
     },

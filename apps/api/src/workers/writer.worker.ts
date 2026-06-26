@@ -1,12 +1,8 @@
 import { Worker } from "bullmq";
 import { db } from "../db/client";
-import { createCompletion } from "../lib/groq";
+import { streamCompletion } from "../lib/groq";
 import { redisConnection } from "../redis/client";
-import {
-  publishSessionEvent,
-  publishSessionStatus,
-  streamTextAsTokens,
-} from "../ws/session";
+import { publishSessionEvent, publishSessionStatus } from "../ws/session";
 
 interface WriterJobData {
   sessionId: string;
@@ -21,7 +17,8 @@ export function startWriterWorker(): Worker<WriterJobData> {
       const { sessionId, prospectContext, researchSummary } = job.data;
       await publishSessionStatus(sessionId, "writing");
 
-      const businessCase = await createCompletion([
+      let businessCase = "";
+      for await (const token of streamCompletion([
         {
           role: "system",
           content:
@@ -31,9 +28,10 @@ export function startWriterWorker(): Worker<WriterJobData> {
           role: "user",
           content: `Prospect context:\n${prospectContext}\n\nResearch summary:\n${researchSummary}`,
         },
-      ]);
-
-      await streamTextAsTokens(sessionId, businessCase);
+      ])) {
+        businessCase += token;
+        await publishSessionEvent(sessionId, { type: "token", data: token });
+      }
 
       await db.query(
         `

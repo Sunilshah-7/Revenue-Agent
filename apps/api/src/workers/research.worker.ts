@@ -1,12 +1,13 @@
 import { Worker } from "bullmq";
-import { createCompletion } from "../lib/groq";
+import { streamCompletion } from "../lib/groq";
 import { retrieveTopChunks } from "../rag/retrieve";
 import { redisConnection } from "../redis/client";
-import { publishSessionStatus, streamTextAsTokens } from "../ws/session";
+import { publishSessionEvent, publishSessionStatus } from "../ws/session";
 
 interface ResearchJobData {
   sessionId: string;
   input: {
+    playbookId?: string;
     prospectContext: string;
   };
 }
@@ -18,12 +19,17 @@ export function startResearchWorker(): Worker<ResearchJobData, string> {
       const { sessionId, input } = job.data;
       await publishSessionStatus(sessionId, "researching");
 
-      const retrieved = await retrieveTopChunks(input.prospectContext, 5);
+      const retrieved = await retrieveTopChunks(
+        input.prospectContext,
+        5,
+        input.playbookId,
+      );
       const context = retrieved
         .map((chunk, idx) => `[#${idx + 1}] ${chunk.content}`)
         .join("\n\n");
 
-      const summary = await createCompletion([
+      let summary = "";
+      for await (const token of streamCompletion([
         {
           role: "system",
           content:
@@ -33,9 +39,12 @@ export function startResearchWorker(): Worker<ResearchJobData, string> {
           role: "user",
           content: `Prospect context:\n${input.prospectContext}\n\nRetrieved playbook context:\n${context}`,
         },
-      ]);
+      ])) {
+        summary += token;
+        await publishSessionEvent(sessionId, { type: "token", data: token });
+      }
 
-      await streamTextAsTokens(sessionId, summary + "\n\n");
+      await publishSessionEvent(sessionId, { type: "token", data: "\n\n" });
       return summary;
     },
     {

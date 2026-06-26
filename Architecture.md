@@ -127,7 +127,7 @@ apps/api/
 │   ├── index.ts                # Bun entry — mounts Hono + Elysia
 │   ├── routes/
 │   │   ├── documents.ts        # POST /api/v1/documents (ingest + embed)
-│   │   ├── sessions.ts         # POST /api/v1/sessions (start agent run)
+│   │   ├── sessions.ts         # GET/POST /api/v1/sessions, GET /:id
 │   │   ├── query.ts            # POST /api/v1/query (RAG query)
 │   │   └── health.ts           # GET /health
 │   ├── ws/
@@ -410,7 +410,7 @@ CREATE TABLE sessions (
 │   Vercel (Free)     │      │         Railway (Hobby $5/mo)     │
 │                     │      │                                   │
 │  Next.js Frontend   │─────►│  Bun process                      │
-│  - Static assets    │ HTTPS│  ├── Hono REST API (:3000)        │
+│  - Static assets    │ HTTPS│  ├── Hono REST API (:3001)        │
 │  - RSC rendering    │      │  ├── Elysia WebSocket (:3001)     │
 │  - Edge middleware  │      │  └── BullMQ Workers (in-process)  │
 └─────────────────────┘      └──────────┬──────────────┬─────────┘
@@ -451,8 +451,7 @@ REDIS_HOST=              # Upstash Redis endpoint
 REDIS_PORT=6379
 REDIS_PASSWORD=          # Upstash Redis password
 GROQ_API_KEY=            # Groq API key (free tier)
-PORT=3000
-WS_PORT=3001
+PORT=3001                # REST + WebSocket upgrade
 FRONTEND_URL=            # Vercel deployment URL (for CORS)
 
 # Frontend (Vercel)

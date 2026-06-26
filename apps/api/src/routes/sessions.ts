@@ -10,6 +10,19 @@ const createSessionSchema = z.object({
 
 export const sessionsRouter = new Hono();
 
+sessionsRouter.get("/api/v1/sessions", async (c) => {
+  const result = await db.query(
+    `
+      SELECT id, status, input, output, error_message, created_at, updated_at
+      FROM sessions
+      ORDER BY created_at DESC
+      LIMIT 50
+    `,
+  );
+
+  return c.json({ sessions: result.rows });
+});
+
 sessionsRouter.post("/api/v1/sessions", async (c) => {
   try {
     const body = await c.req.json();

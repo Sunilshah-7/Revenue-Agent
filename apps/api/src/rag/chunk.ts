@@ -1,6 +1,7 @@
 export interface TextChunk {
   content: string;
   index: number;
+  pageHint: number | null;
 }
 
 interface ChunkOptions {
@@ -21,25 +22,45 @@ export function chunkText(
   }
 
   const chunks: TextChunk[] = [];
-  const step = Math.max(1, size - overlap);
+  let start = 0;
 
-  for (let i = 0; i < words.length; i += step) {
+  while (start < words.length) {
+    const maxEnd = Math.min(start + size, words.length);
+    let end = maxEnd;
+
+    if (maxEnd < words.length) {
+      const minSentenceEnd = Math.min(
+        maxEnd - 1,
+        start + Math.floor(size * 0.6),
+      );
+
+      for (let i = maxEnd - 1; i >= minSentenceEnd; i -= 1) {
+        if (/[.!?]["')\]]?$/.test(words[i])) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+
     const slice = words
-      .slice(i, i + size)
+      .slice(start, end)
       .join(" ")
       .trim();
     if (slice.length === 0) {
-      continue;
+      break;
     }
 
     chunks.push({
       content: slice,
       index: chunks.length,
+      pageHint: null,
     });
 
-    if (i + size >= words.length) {
+    if (end >= words.length) {
       break;
     }
+
+    start = Math.max(start + 1, end - overlap);
   }
 
   return chunks;

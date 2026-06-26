@@ -83,13 +83,3 @@ export async function publishSessionStatus(
 ): Promise<void> {
   await publishSessionEvent(sessionId, { type: "status", state: status });
 }
-
-export async function streamTextAsTokens(
-  sessionId: string,
-  text: string,
-): Promise<void> {
-  const tokens = text.split(/(\s+)/).filter((token) => token.length > 0);
-  for (const token of tokens) {
-    await publishSessionEvent(sessionId, { type: "token", data: token });
-  }
-}

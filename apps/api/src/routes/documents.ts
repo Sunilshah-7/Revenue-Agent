@@ -51,6 +51,7 @@ documentsRouter.post("/api/v1/documents", async (c) => {
           filename: file.name,
           chunk: chunk.content,
           chunkIndex: chunk.index,
+          pageHint: chunk.pageHint,
         },
         {
           attempts: 3,

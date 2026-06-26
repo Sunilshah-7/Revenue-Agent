@@ -7,7 +7,6 @@ const envSchema = z.object({
   REDIS_PASSWORD: z.string().min(1),
   GROQ_API_KEY: z.string().min(1),
   PORT: z.coerce.number().default(3001),
-  WS_PORT: z.coerce.number().optional(),
   FRONTEND_URL: z.string().default("http://localhost:3000"),
 });
 
