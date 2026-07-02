@@ -1,0 +1,34 @@
+# Copy .env.example to .env at the repo root before running `npm run infra:local`.
+# ARAP_LOCAL_DB_PASSWORD and ARAP_LOCAL_REDIS_PASSWORD must be set there;
+# docker compose reads that file automatically.
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: arap
+      POSTGRES_USER: arap
+      POSTGRES_PASSWORD: ${ARAP_LOCAL_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - arap_postgres_data:/var/lib/postgresql/data
+      - ./apps/api/src/db/migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arap -d arap"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--requirepass", "${ARAP_LOCAL_REDIS_PASSWORD}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${ARAP_LOCAL_REDIS_PASSWORD}", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  arap_postgres_data:

@@ -9,11 +9,13 @@ import {
   LayoutDashboard,
   Search,
   Sparkles,
+  Terminal,
 } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Playbooks", href: "/playbooks", icon: BookOpen },
+  { label: "Query", href: "/query", icon: Terminal },
 ] as const;
 
 export function Navbar() {

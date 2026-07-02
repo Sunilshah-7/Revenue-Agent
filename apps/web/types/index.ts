@@ -25,3 +25,16 @@ export type WsMessage =
   | { type: "status"; state: SessionStatus }
   | { type: "error"; message: string }
   | { type: "done" };
+
+export interface QuerySourceScore {
+  score: number;
+}
+
+export interface QueryMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  sources?: QuerySourceScore[];
+  isLoading?: boolean;
+}
