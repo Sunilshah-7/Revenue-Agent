@@ -172,6 +172,13 @@ NEXT_PUBLIC_WS_URL=ws://localhost:3001
 ### 6. Run locally
 
 ```bash
+# From the repo root — starts backend + frontend together
+npm run dev
+```
+
+Or run them separately in two terminals:
+
+```bash
 # Terminal 1 — backend
 cd apps/api
 bun run src/index.ts
