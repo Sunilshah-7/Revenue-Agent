@@ -1,5 +1,9 @@
 "use client";
 
+// Composer bar pinned to the bottom of the Query screen: an
+// auto-growing textarea, a streaming-mode toggle, and a send button. Fully
+// controlled from the parent (app/query/page.tsx) — this component holds
+// no message/network state of its own.
 import { ArrowUp } from "lucide-react";
 import { useEffect, useRef, type KeyboardEvent } from "react";
 
@@ -20,6 +24,9 @@ export function QueryInput({
 }: QueryInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Manual auto-resize: reset to "auto" first so scrollHeight reflects the
+  // content after a deletion (shrinking), then grow to fit — a plain CSS
+  // solution can't shrink back down without this reset step.
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) {
@@ -29,6 +36,8 @@ export function QueryInput({
     el.style.height = `${el.scrollHeight}px`;
   }, [value]);
 
+  // Enter sends, Shift+Enter inserts a newline (standard chat-input
+  // convention).
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();

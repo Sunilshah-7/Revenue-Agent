@@ -1,3 +1,7 @@
+// Five-variant status badge (per the Key Files Map) shared across the
+// seeded Dashboard/Playbooks/Live-Session screens. Note the fifth variant,
+// "live", is UI-only pulse styling with no icon/config entry — it isn't a
+// SessionStatus value from the backend at all.
 import {
   CheckCircle,
   Loader2,

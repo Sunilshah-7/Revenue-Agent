@@ -1,5 +1,8 @@
 "use client";
 
+// Playbook-scope selector for the Query screen's header. A custom
+// dropdown (not a native <select>) so it can be styled to match the rest
+// of the UI; closes on outside click or Escape.
 import { BookOpen, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -8,6 +11,9 @@ interface PlaybookDropdownProps {
   onSelect: (playbook: string) => void;
 }
 
+// Fixture option list — stands in for playbook titles that would come from
+// GET /api/v1/documents; selecting one doesn't currently scope the (also
+// fixture) query response to that playbook.
 const PLAYBOOK_OPTIONS = [
   "All Playbooks",
   "Enterprise SaaS",
@@ -22,6 +28,9 @@ export function PlaybookDropdown({ activePlaybook, onSelect }: PlaybookDropdownP
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Global listeners (rather than a blur handler) so clicking anywhere
+  // outside the dropdown — including on other page elements — closes it,
+  // and Escape closes it regardless of focus.
   useEffect(() => {
     function onClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {

@@ -1,6 +1,13 @@
+// Design tokens (per the Key Files Map) — the single source of truth for
+// this app's dark, terminal-inspired color palette, fonts, and radii.
+// Every component in components/ and app/ styles itself with these
+// semantic Tailwind class names (bg-bg-surface, text-text-secondary, etc.)
+// rather than raw hex values or Tailwind's default palette.
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  // Tailwind only generates CSS for class names it finds by scanning these
+  // globs, so any new directory using Tailwind classes must be added here.
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
@@ -9,6 +16,10 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // Semantic dark-theme palette: bg-* are surface layers (base <
+      // surface < elevated), text-* are content hierarchy, and
+      // green/amber/blue/red map directly to the SessionStatus states
+      // (complete/writing/researching/error) used by StatusBadge.
       colors: {
         "bg-base": "#0D1117",
         "bg-surface": "#161B22",
@@ -27,6 +38,9 @@ const config: Config = {
         "text-mono": "#C9D1D9",
         "text-accent": "#A78BFA",
       },
+      // Reads font families from CSS custom properties (set elsewhere via
+      // globals.css / font loading) rather than hardcoding font names, with
+      // the literal family names as a fallback if the variables are unset.
       fontFamily: {
         sans: ["var(--font-inter)", "Inter", "sans-serif"],
         mono: ["var(--font-jetbrains-mono)", "JetBrains Mono", "monospace"],

@@ -1,5 +1,9 @@
 "use client";
 
+// The genuinely-wired real-time output panel: opens a real WebSocket via
+// lib/ws-client.ts to /ws/session/:id and renders tokens as they arrive.
+// Used by the real session-detail route (app/dashboard/[sessionId]/page.tsx),
+// not by the documented-but-still-simulated "/session/[id]" screen.
 import { useEffect, useMemo, useState } from "react";
 import { connectSessionStream } from "../lib/ws-client";
 import type { SessionStatus, WsMessage } from "../types";
@@ -15,6 +19,10 @@ export function StreamPanel({
   const [status, setStatus] = useState<SessionStatus>("researching");
   const [output, setOutput] = useState(initialOutput ?? "");
 
+  // Mirrors the four SessionWsEvent variants exactly: tokens append to the
+  // running output, status/error/done update the badge state. The socket
+  // is opened once per sessionId and explicitly closed on unmount/sessionId
+  // change to avoid leaking connections across navigations.
   useEffect(() => {
     const ws = connectSessionStream(sessionId, {
       onMessage(message: WsMessage) {

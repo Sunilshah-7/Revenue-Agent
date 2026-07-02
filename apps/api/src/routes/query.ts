@@ -1,3 +1,7 @@
+// Implements POST /api/v1/query — the one-shot RAG endpoint backing the
+// Query screen. Supports both a plain JSON response and an SSE streaming
+// response (the same one used for real Live Session output), and can
+// optionally attach its output to an existing session's WS channel.
 import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db/client";
@@ -32,6 +36,10 @@ function buildQueryMessages(query: string, context: string): QueryMessage[] {
   ];
 }
 
+// Falls back to the playbook the given session was originally started
+// with, so a query attached to a session (sessionId set, no explicit
+// playbookId) automatically scopes retrieval to that session's playbook
+// instead of searching every indexed document.
 async function resolvePlaybookId(
   sessionId?: string,
   explicitPlaybookId?: string,
@@ -59,6 +67,9 @@ async function resolvePlaybookId(
     return undefined;
   }
 
+  // The pg driver may return JSONB either already-parsed or as a raw
+  // string depending on column typing/driver config, so both are handled
+  // defensively here.
   const parsed =
     typeof input === "string" ? (JSON.parse(input) as unknown) : input;
 
@@ -74,6 +85,10 @@ async function resolvePlaybookId(
   return undefined;
 }
 
+// Builds a raw text/event-stream Response by hand-writing SSE "data:"
+// frames from a Web Streams ReadableStream — no SSE library, just the
+// standard fetch Response body contract that both browsers and the Next.js
+// proxy can consume directly.
 function streamQueryResponse(
   messages: QueryMessage[],
   sessionId?: string,
@@ -93,6 +108,10 @@ function streamQueryResponse(
           const event: SessionWsEvent = { type: "token", data: token };
           send(event);
 
+          // When a sessionId is attached, the same token is also republished
+          // on that session's Redis channel — so a query issued against an
+          // active session shows up in that session's WebSocket clients too,
+          // not just in this HTTP response.
           if (sessionId) {
             await publishSessionEvent(sessionId, event);
           }
@@ -125,6 +144,8 @@ function streamQueryResponse(
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // Disables proxy buffering (e.g. nginx) that would otherwise batch
+      // SSE frames and defeat token-by-token streaming.
       "X-Accel-Buffering": "no",
     },
   });
@@ -146,6 +167,9 @@ queryRouter.post("/api/v1/query", async (c) => {
       .join("\n\n");
 
     const messages = buildQueryMessages(query, context);
+    // SSE mode can be requested either explicitly (`stream: true` in the
+    // body) or implicitly via an `Accept: text/event-stream` header — this
+    // matches the API Contract's documented trigger for streaming.
     const acceptsSse = c.req.header("accept")?.includes("text/event-stream");
 
     if (stream || acceptsSse) {

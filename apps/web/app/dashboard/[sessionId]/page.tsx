@@ -1,3 +1,9 @@
+// A second, actually-live session-detail route at "/dashboard/[sessionId]"
+// — distinct from the documented "/session/[id]" Live Session screen in
+// CLAUDE.md, which is still seeded/simulated. This one is a real React
+// Server Component: it calls getSession() server-side against the real
+// GET /api/v1/sessions/:id proxy before rendering, then hands off to the
+// client-side StreamPanel (which opens the real WebSocket) for live output.
 import { StreamPanel } from "../../../components/StreamPanel";
 import { getSession } from "../../../lib/api";
 

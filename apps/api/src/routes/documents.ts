@@ -1,3 +1,8 @@
+// Implements POST/GET /api/v1/documents — playbook upload and inventory.
+// Upload is synchronous through extraction+chunking+DB insert, then fans
+// chunk embedding out asynchronously to the "embed" BullMQ queue; the
+// caller gets a response as soon as jobs are queued, not once embedding
+// finishes (chunksQueued reflects "queued", not "embedded").
 import { Hono } from "hono";
 import pdfParse from "pdf-parse";
 import { db } from "../db/client";
@@ -6,6 +11,8 @@ import { embedQueue } from "../workers/queue";
 
 export const documentsRouter = new Hono();
 
+// Only plain text and PDF are supported; anything else throws, which the
+// POST handler below turns into a 500 with the error message.
 async function extractTextFromFile(file: File): Promise<string> {
   if (file.type === "text/plain" || file.name.endsWith(".txt")) {
     return file.text();
@@ -43,6 +50,9 @@ documentsRouter.post("/api/v1/documents", async (c) => {
     const docId = documentInsert.rows[0].id;
     const chunks = chunkText(content, { size: 512, overlap: 64 });
 
+    // One embed job per chunk, enqueued sequentially in a loop (not
+    // Promise.all) — this keeps enqueue order stable and avoids bursting
+    // Redis with many concurrent `add` calls for large documents.
     for (const chunk of chunks) {
       await embedQueue.add(
         "embed",
@@ -75,6 +85,8 @@ documentsRouter.post("/api/v1/documents", async (c) => {
   }
 });
 
+// Live inventory list — per CLAUDE.md, the Playbooks screen's grid is
+// currently still seeded client-side and not yet wired to this endpoint.
 documentsRouter.get("/api/v1/documents", async (c) => {
   const result = await db.query(
     `

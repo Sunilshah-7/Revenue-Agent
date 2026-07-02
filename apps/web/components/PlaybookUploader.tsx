@@ -1,5 +1,8 @@
 "use client";
 
+// Minimal, fully-live upload control (no fixtures) — a simpler alternative
+// to the Playbooks screen's own inline drag-and-drop uploader, sharing the
+// same uploadDocument() call.
 import { useState } from "react";
 import { uploadDocument } from "../lib/api";
 

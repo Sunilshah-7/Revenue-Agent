@@ -1,3 +1,5 @@
+// Right-aligned chat bubble for the user's half of a query turn — plain
+// text only (no markdown rendering, unlike AssistantMessage).
 interface UserMessageProps {
   content: string;
   timestamp: string;

@@ -1,5 +1,13 @@
 "use client";
 
+// Live Session screen ("/session/[id]") — the documented production
+// contract (per CLAUDE.md) is GET /api/v1/sessions/:id for persisted state
+// plus WS /ws/session/:id for status/token/error/done events. Nothing on
+// this page calls either: pipelineSteps, metadataRows, and streamContent
+// below are all fixtures, and the useEffect further down fakes token-by-
+// token streaming with a setInterval typewriter effect instead of
+// consuming the real WebSocket. Contrast with the real, wired variant at
+// app/dashboard/[sessionId]/page.tsx + components/StreamPanel.tsx.
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
@@ -23,6 +31,8 @@ interface PipelineStep {
   duration?: string;
 }
 
+// Fixture prospect metadata — stands in for the "input" field of a real
+// SessionRecord fetched from GET /api/v1/sessions/:id.
 const metadataRows = [
   { icon: Building2, label: "Company", value: "Stripe Inc." },
   { icon: User, label: "Contact", value: "Patrick Collison" },
@@ -31,6 +41,11 @@ const metadataRows = [
   { icon: Clock, label: "Elapsed", value: "Running...", live: true },
 ];
 
+// Fixture pipeline progress — the real pipeline only has two agent stages
+// (research, write; see architecture paragraph in CLAUDE.md), so this six-
+// step breakdown ("Web Research", "Doc Indexing", "Synthesis", etc.) is a
+// more granular UI fiction than the backend actually reports via "status"
+// WS events.
 const pipelineSteps: PipelineStep[] = [
   {
     name: "Queued",
@@ -67,6 +82,8 @@ const pipelineSteps: PipelineStep[] = [
   },
 ];
 
+// Fixture agent output — stands in for the "token" WS events that would
+// otherwise be concatenated live from the real research/write workers.
 const streamContent = `## Research Phase — Stripe / Patrick Collison
 
 ### 1. Company Intelligence
@@ -197,6 +214,10 @@ function renderInline(text: string): ReactNode[] {
   });
 }
 
+// Hand-rolled line-based Markdown renderer (##, ###, "› " bullets, **bold**
+// inline spans) — no markdown library, just enough syntax to render this
+// page's fixture content plus a trailing blinking cursor to sell the
+// "still streaming" look.
 function StreamedMarkdown({ content }: { content: string }) {
   const lines = content.split("\n");
 
@@ -238,6 +259,9 @@ export default function LiveAgentSessionPage() {
   const [streamedContent, setStreamedContent] = useState("");
   const streamTokens = useMemo(() => streamContent.split(/(\s+)/), []);
 
+  // Simulates the real WS "token" event stream: reveals one whitespace-
+  // delimited token of the fixture text every 30ms via setInterval, rather
+  // than appending tokens as they actually arrive over a WebSocket.
   useEffect(() => {
     let tokenIndex = 0;
     const interval = window.setInterval(() => {

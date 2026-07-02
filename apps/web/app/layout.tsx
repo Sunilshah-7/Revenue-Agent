@@ -1,3 +1,5 @@
+// Root App Router layout — wraps every page with the global shell (fonts,
+// Tailwind base styles via globals.css, and the persistent Navbar).
 import type { Metadata } from "next";
 import { Navbar } from "../components/ui/Navbar";
 import "./globals.css";

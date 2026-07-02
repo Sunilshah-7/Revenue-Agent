@@ -1,5 +1,9 @@
 "use client";
 
+// Scrollable message list for the Query screen. Purely presentational —
+// receives the full `messages` array from app/query/page.tsx's local state
+// and renders an empty state, timestamp separators, and each turn as
+// either UserMessage or AssistantMessage.
 import { Sparkles } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import type { QueryMessage } from "../../types";
@@ -13,6 +17,9 @@ interface MessageThreadProps {
 export function MessageThread({ messages }: MessageThreadProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
+  // Auto-scrolls to the newest message whenever the thread changes,
+  // including on every incremental token update during the simulated
+  // streaming response.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -36,6 +43,9 @@ export function MessageThread({ messages }: MessageThreadProps) {
     );
   }
 
+  // Inserts a centered timestamp divider whenever the timestamp changes
+  // between consecutive messages (rather than on every message), grouping
+  // turns sent in quick succession under one label.
   const nodes: ReactNode[] = [];
   let previousTimestamp: string | null = null;
 
