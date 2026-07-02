@@ -8,10 +8,13 @@
     "build": "npm run build:api",
     "build:api": "npm --workspace apps/api run typecheck",
     "start": "npm run start:api",
-    "start:api": "bun --cwd apps/api run start",
-    "dev:web": "bun --cwd apps/web run dev",
-    "dev:api": "bun --cwd apps/api run dev",
-    "dev": "echo 'Run dev:api and dev:web in separate terminals'",
-    "typecheck": "bun --cwd apps/api run typecheck && bun --cwd apps/web run typecheck"
+    "start:api": "bun --cwd=apps/api run start",
+    "dev:web": "bun --cwd=apps/web run dev",
+    "dev:api": "bun --cwd=apps/api run dev",
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "typecheck": "bun --cwd=apps/api run typecheck && bun --cwd=apps/web run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
   }
 }
