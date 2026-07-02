@@ -58,3 +58,12 @@ textarea:focus-visible {
   background: color-mix(in srgb, var(--accent-primary) 45%, transparent);
   color: var(--text-primary);
 }
+
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
