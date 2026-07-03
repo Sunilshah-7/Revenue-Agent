@@ -4,6 +4,7 @@
 // Everything below runs once at module load (Bun executes this top-to-bottom
 // and then keeps the process alive via the listeners/servers it starts).
 import { Elysia } from "elysia";
+import { openapi } from "@elysiajs/openapi";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { db } from "./db/client";
@@ -189,7 +190,50 @@ await initializeSessionEventBridge();
 // map in ws/session.ts; the catch-all "/*" route hands everything else off
 // to the Hono `api` app's fetch handler, so one process serves both
 // protocols on one port.
+//
+// @elysiajs/openapi only generates docs from routes declared natively on
+// this Elysia instance — it cannot see the Hono routes hidden behind the
+// catch-all below. Endpoint documentation is added separately (see
+// docs/router.ts) as thin passthrough routes that carry OpenAPI metadata
+// and delegate straight back into `api.fetch(request)`; this `.use()` just
+// mounts the docs UI itself at GET /openapi (Scalar, the plugin default)
+// and GET /openapi/json (raw OpenAPI document).
 const app = new Elysia()
+  .use(
+    openapi({
+      documentation: {
+        info: {
+          title: "ARAP API",
+          version: "v2.4",
+          description:
+            "REST and WebSocket contract for the AI Revenue Agent Platform. " +
+            "The WebSocket endpoint `/ws/session/:id` streams session " +
+            "events (`token`, `status`, `error`, `done`) and is not shown " +
+            "as an operation below since OpenAPI 3.0 has no WebSocket " +
+            "semantics — see the Sessions tag description for its event " +
+            "shapes.",
+        },
+        tags: [
+          {
+            name: "Documents",
+            description: "Playbook upload and inventory.",
+          },
+          {
+            name: "Sessions",
+            description:
+              "Agent session lifecycle. Also see /ws/session/:id, which " +
+              'streams { type: "token" | "status" | "error" | "done", ... } ' +
+              "events for a session over WebSocket once a run starts.",
+          },
+          {
+            name: "Query",
+            description: "One-shot RAG query against playbooks.",
+          },
+          { name: "Health", description: "Operational health check." },
+        ],
+      },
+    }),
+  )
   .ws("/ws/session/:id", {
     open(ws) {
       const id = String(ws.data.params.id);
