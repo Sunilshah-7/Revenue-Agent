@@ -11,6 +11,33 @@
 // documented in CLAUDE.md exactly.
 import { Elysia } from "elysia";
 import type { Hono } from "hono";
+import type { OpenAPIV3 } from "openapi-types";
+
+// Matches the SessionRecord shape in apps/api/src/types.ts and CLAUDE.md's
+// API Contract exactly — reused across the three session endpoints below
+// rather than repeated inline.
+const sessionRecordSchema: OpenAPIV3.SchemaObject = {
+  type: "object",
+  properties: {
+    id: { type: "string", format: "uuid" },
+    status: {
+      type: "string",
+      enum: ["idle", "researching", "writing", "complete", "error"],
+    },
+    input: {
+      type: "object",
+      properties: {
+        playbookId: { type: "string", format: "uuid" },
+        prospectContext: { type: "string" },
+      },
+      required: ["prospectContext"],
+    },
+    output: { type: "string", nullable: true },
+    error_message: { type: "string", nullable: true },
+    created_at: { type: "string", format: "date-time" },
+    updated_at: { type: "string", format: "date-time" },
+  },
+};
 
 export function createDocsRouter(api: Hono) {
   const forward = ({ request }: { request: Request }) => api.fetch(request);
@@ -115,6 +142,124 @@ export function createDocsRouter(api: Hono) {
                       },
                     },
                   },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    .get("/api/v1/sessions", forward, {
+      detail: {
+        tags: ["Sessions"],
+        summary: "List recent agent sessions",
+        description:
+          "Most recent 50 sessions, newest first. Per CLAUDE.md, the " +
+          "Dashboard's recents list does not call this endpoint yet.",
+        responses: {
+          "200": {
+            description: "Recent sessions.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    sessions: {
+                      type: "array",
+                      items: sessionRecordSchema,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    .post("/api/v1/sessions", forward, {
+      detail: {
+        tags: ["Sessions"],
+        summary: "Start a new agent session",
+        description:
+          "Inserts the session as `idle`, then immediately calls " +
+          "OrchestratorAgent.start(), which flips it to `researching` and " +
+          "enqueues the research job. Connect to /ws/session/:id with the " +
+          "returned sessionId to receive token/status/error/done events " +
+          "as the run progresses.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["prospectContext"],
+                properties: {
+                  playbookId: { type: "string", format: "uuid" },
+                  prospectContext: { type: "string", minLength: 1 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": {
+            description: "Session created and research enqueued.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    sessionId: { type: "string", format: "uuid" },
+                    status: { type: "string", enum: ["researching"] },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "prospectContext was missing or empty.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    .get("/api/v1/sessions/:id", forward, {
+      detail: {
+        tags: ["Sessions"],
+        summary: "Get session status and output",
+        description:
+          "Persisted session state. Per CLAUDE.md, the Live Session " +
+          "screen still animates seeded content instead of calling this " +
+          "and the WS endpoint.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Session found.",
+            content: {
+              "application/json": { schema: sessionRecordSchema },
+            },
+          },
+          "404": {
+            description: "No session with that id.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
                 },
               },
             },
