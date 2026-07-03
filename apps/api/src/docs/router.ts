@@ -266,5 +266,86 @@ export function createDocsRouter(api: Hono) {
           },
         },
       },
+    })
+    .post("/api/v1/query", forward, {
+      detail: {
+        tags: ["Query"],
+        summary: "One-shot RAG query against playbooks",
+        description:
+          "Retrieves the topK nearest playbook chunks and answers from " +
+          "them. If sessionId is set and playbookId is omitted, retrieval " +
+          "is scoped to that session's original playbook. Set `stream: " +
+          "true` in the body, or send `Accept: text/event-stream`, to " +
+          "receive the answer as SSE frames (each `data:` line is a " +
+          "SessionWsEvent — token/status/error/done) instead of a single " +
+          "JSON response; if sessionId is set, the same tokens are also " +
+          "republished on that session's WebSocket channel.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["query"],
+                properties: {
+                  query: { type: "string", minLength: 1 },
+                  sessionId: { type: "string", format: "uuid" },
+                  playbookId: { type: "string", format: "uuid" },
+                  topK: { type: "integer", minimum: 1, maximum: 20 },
+                  stream: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description:
+              "JSON answer (default), or an SSE stream if `stream: true` " +
+              "or `Accept: text/event-stream` was sent.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    answer: { type: "string" },
+                    chunks: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          doc_id: { type: "string", format: "uuid" },
+                          content: { type: "string" },
+                          score: { type: "number" },
+                          metadata: { type: "object" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              "text/event-stream": {
+                schema: {
+                  type: "string",
+                  description:
+                    'One SessionWsEvent per "data:" frame, e.g. ' +
+                    '`data: {"type":"token","data":"..."}`.',
+                },
+              },
+            },
+          },
+          "400": {
+            description: "query was missing/empty, or topK was out of range.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 }
