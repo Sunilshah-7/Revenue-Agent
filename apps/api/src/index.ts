@@ -208,11 +208,10 @@ const app = new Elysia()
           version: "v2.4",
           description:
             "REST and WebSocket contract for the AI Revenue Agent Platform. " +
-            "The WebSocket endpoint `/ws/session/:id` streams session " +
-            "events (`token`, `status`, `error`, `done`) and is not shown " +
-            "as an operation below since OpenAPI 3.0 has no WebSocket " +
-            "semantics — see the Sessions tag description for its event " +
-            "shapes.",
+            "`/ws/session/:id` below is listed as a bare path — OpenAPI " +
+            "3.0 has no request/response semantics for WebSocket " +
+            "operations, so its `token`/`status`/`error`/`done` event " +
+            "shapes are documented in prose on the Sessions tag instead.",
         },
         tags: [
           {
@@ -233,6 +232,11 @@ const app = new Elysia()
           { name: "Health", description: "Operational health check." },
         ],
       },
+      // The Hono catch-all is itself a native Elysia route (`.all("/*",
+      // ...)` below) and would otherwise show up as a phantom "every
+      // method" entry in the generated docs; every path it actually
+      // forwards is already documented individually via docs/router.ts.
+      exclude: { paths: ["/*"] },
     }),
   )
   .use(createDocsRouter(api))

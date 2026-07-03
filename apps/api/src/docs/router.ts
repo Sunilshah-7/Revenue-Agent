@@ -347,5 +347,30 @@ export function createDocsRouter(api: Hono) {
           },
         },
       },
+    })
+    .get("/health", forward, {
+      detail: {
+        tags: ["Health"],
+        summary: "Health check",
+        description:
+          "Operational endpoint for Railway health checks and local " +
+          "sanity checks — not one of the six product REST endpoints.",
+        responses: {
+          "200": {
+            description: "Process is up.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    status: { type: "string", enum: ["ok"] },
+                    timestamp: { type: "string", format: "date-time" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
 }
