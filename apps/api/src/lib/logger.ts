@@ -1,3 +1,5 @@
+// Minimal structured-ish console logger shared across the API — no external
+// logging library, since Railway just captures stdout.
 type LogLevel = "info" | "warn" | "error";
 
 function emit(level: LogLevel, message: string, payload?: unknown): void {
@@ -6,6 +8,8 @@ function emit(level: LogLevel, message: string, payload?: unknown): void {
     console.log(base);
     return;
   }
+  // Note: error-level logs still go through console.log rather than
+  // console.error, so all levels interleave in one stdout stream in order.
   console.log(base, payload);
 }
 

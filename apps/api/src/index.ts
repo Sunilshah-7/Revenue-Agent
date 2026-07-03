@@ -1,3 +1,8 @@
+// Process entry point: this single file boots the whole API process —
+// the Hono REST layer, the Elysia WebSocket layer, all three BullMQ
+// workers, and the queue-completion listeners that chain research -> write.
+// Everything below runs once at module load (Bun executes this top-to-bottom
+// and then keeps the process alive via the listeners/servers it starts).
 import { Elysia } from "elysia";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -24,8 +29,14 @@ import {
   unregisterSessionSocket,
 } from "./ws/session";
 
+// Hono handles the six REST endpoints (documents/sessions/query/health).
+// It is mounted as a catch-all fetch handler inside the Elysia app below so
+// both REST and WS traffic share one Bun server/port.
 const api = new Hono();
 
+// Single allowed browser origin (FRONTEND_URL) rather than a wildcard,
+// since the frontend sends credentials-free but still same-origin-sensitive
+// requests through the Next.js proxy routes.
 api.use(
   "*",
   cors({
@@ -35,15 +46,26 @@ api.use(
   }),
 );
 
+// Each router owns its own path prefix internally, so they all mount at "/".
 api.route("/", healthRouter);
 api.route("/", documentsRouter);
 api.route("/", sessionsRouter);
 api.route("/", queryRouter);
 
+// Workers are long-running BullMQ consumers; starting them here (rather than
+// as separate processes) keeps local dev and the single Railway deployment
+// simple at the cost of coupling API uptime to worker uptime.
 const embedWorker = startEmbedWorker();
 const researchWorker = startResearchWorker();
 const writerWorker = startWriterWorker();
 
+// This listener is the hinge of the orchestration pipeline: it is what
+// advances a session from "researching" to "writing" once the research
+// worker's job resolves, by reading the research summary out of the job's
+// return value and enqueueing the writer job with it. There is no direct
+// call from the research worker into the writer queue — this decoupling
+// through QueueEvents is what lets research and writing be retried,
+// observed, and scaled independently (see Active Decisions Log).
 researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
   if (!jobId) {
     return;
@@ -68,6 +90,10 @@ researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
 
   await publishSessionStatus(sessionId, "writing");
 
+  // Retries/backoff/removeOnFail are set per-enqueue rather than as a queue
+  // default so the writer stage's retry policy can diverge from research's
+  // if needed; removeOnFail: false keeps failed writer jobs around for
+  // inspection instead of silently discarding them.
   await writerQueue.add(
     "write",
     {
@@ -84,6 +110,9 @@ researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
   );
 });
 
+// If research itself fails (after its own retries are exhausted), the
+// session is terminally marked "error" and the writer stage never runs —
+// there is no partial/fallback business case.
 researchQueueEvents.on("failed", async ({ jobId, failedReason }) => {
   if (!jobId) {
     return;
@@ -110,6 +139,10 @@ researchQueueEvents.on("failed", async ({ jobId, failedReason }) => {
   });
 });
 
+// Mirror of the research-failure handler, but bound directly to the writer
+// Worker's "failed" event instead of QueueEvents — both approaches exist
+// in this file because the writer's completion isn't chained into a further
+// stage, so a lighter-weight Worker-level listener suffices here.
 writerWorker.on("failed", async (job, error) => {
   const sessionId = job?.data.sessionId;
   if (!sessionId) {
@@ -131,6 +164,9 @@ writerWorker.on("failed", async (job, error) => {
   });
 });
 
+// "error" events are BullMQ/Redis-connection-level failures (distinct from
+// job "failed" events above, which are job-logic failures) — these just get
+// logged since there's no per-job session to attach the error to.
 writerWorker.on("error", (error) => {
   logger.error("Writer worker runtime error", error.message);
 });
@@ -143,8 +179,16 @@ embedWorker.on("error", (error) => {
   logger.error("Embed worker runtime error", error.message);
 });
 
+// Subscribes this process to Redis pub/sub channels for session events so
+// that tokens/status published by the workers (running in this same
+// process, but decoupled via Redis) can be forwarded to connected browsers.
 await initializeSessionEventBridge();
 
+// Elysia owns the actual Bun server/port. The WS route registers/
+// unregisters each browser socket against the in-memory session->sockets
+// map in ws/session.ts; the catch-all "/*" route hands everything else off
+// to the Hono `api` app's fetch handler, so one process serves both
+// protocols on one port.
 const app = new Elysia()
   .ws("/ws/session/:id", {
     open(ws) {
@@ -167,6 +211,9 @@ const app = new Elysia()
 app.listen(env.PORT);
 logger.info(`API + WS server listening on :${env.PORT}`);
 
+// Graceful shutdown: let in-flight BullMQ jobs drain and close the Postgres
+// pool cleanly instead of dropping connections when the process is killed
+// (e.g. on a Railway redeploy).
 process.on("SIGINT", async () => {
   await Promise.all([
     embedWorker.close(),

@@ -1,3 +1,8 @@
+// Left-aligned chat bubble for the assistant's half of a query turn.
+// Renders `content` through RichContent's mini-markdown engine, and — once
+// the answer is done — a row of per-chunk retrieval scores below the
+// bubble (the frontend counterpart to QueryResponse.chunks[].score in the
+// API Contract).
 import { ChevronRight, Sparkles } from "lucide-react";
 import type { QuerySourceScore } from "../../types";
 import { RichContent } from "./RichContent";
@@ -8,6 +13,9 @@ interface AssistantMessageProps {
   isLoading?: boolean;
 }
 
+// Color-codes a retrieved chunk's similarity score so higher-confidence
+// sources visually stand out (thresholds are arbitrary UI cutoffs, not
+// derived from any backend-defined confidence banding).
 function scoreColorClass(score: number): string {
   if (score >= 0.93) {
     return "text-green-active";
@@ -19,6 +27,9 @@ function scoreColorClass(score: number): string {
 }
 
 export function AssistantMessage({ content, sources, isLoading }: AssistantMessageProps) {
+  // Three-dot typing indicator only shows before the first token has
+  // arrived; once content starts streaming in, RichContent renders
+  // incrementally instead (isLoading can stay true through that phase).
   const showTypingIndicator = Boolean(isLoading) && content.length === 0;
 
   return (

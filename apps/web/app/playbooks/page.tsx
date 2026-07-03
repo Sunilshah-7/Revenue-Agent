@@ -1,5 +1,11 @@
 "use client";
 
+// Playbooks screen ("/playbooks") — per CLAUDE.md, upload is the one live
+// piece of this page (uploadDocument() below really calls the
+// /api/documents proxy -> POST /api/v1/documents), but the card grid,
+// filters, and sort controls all operate over the seeded `playbooks` array,
+// not GET /api/v1/documents. A newly uploaded file does not appear in the
+// grid: this page's live and seeded data are disconnected.
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
 import {
   Calendar,
@@ -27,6 +33,11 @@ interface Playbook {
   date: string;
 }
 
+// Seeded fixture cards — stands in for a GET /api/v1/documents response.
+// Note MD/DOCX file types appear here and in the upload accept list below,
+// but routes/documents.ts's extractTextFromFile only actually supports
+// PDF and TXT server-side — uploading a .md/.docx file would fail at
+// extraction time despite being accepted by the file picker.
 const playbooks: Playbook[] = [
   {
     title: "Enterprise SaaS Sales Playbook Q2 2025.pdf",
@@ -224,6 +235,11 @@ export default function PlaybooksPage() {
   const [toast, setToast] = useState<ToastState>(null);
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("All");
 
+  // The one real network call on this page: uploadDocument() posts to the
+  // Next.js /api/documents proxy, which forwards to the live
+  // POST /api/v1/documents endpoint and gets back a real chunksQueued
+  // count. The toast timers above are separate cosmetic-only UI state (not
+  // driven by the actual upload's progress/completion).
   async function uploadFirstFile(files: FileList | null) {
     const file = files?.[0];
     if (!file) {

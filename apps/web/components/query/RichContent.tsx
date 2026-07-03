@@ -1,3 +1,10 @@
+// A small hand-rolled Markdown-like renderer purpose-built for this app's
+// assistant-answer format (##/### headings, numbered lists, "› " bullets,
+// "> " blockquotes, "|"-delimited tables, **bold**/[highlight] inline
+// spans). No markdown library dependency — parseBlocks() is a line-based
+// scanner producing a flat Block[] list, then renderBlock() turns each
+// block into JSX. Two passes (parse then render) rather than a single
+// recursive-descent parser, since the source format has no real nesting.
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -31,6 +38,11 @@ function parseTableRow(line: string): string[] {
     .map((cell) => cell.trim());
 }
 
+// Line-by-line scanner: each iteration either consumes one line (headings,
+// quotes) or greedily consumes a contiguous run of lines that belong to
+// the same block (numbered/bulleted lists tolerate single blank lines
+// between items via the lookahead on lines[i + 1]; tables/paragraphs stop
+// at the first line matching a different block type).
 function parseBlocks(content: string): Block[] {
   const lines = content.split("\n");
   const blocks: Block[] = [];
@@ -128,6 +140,12 @@ function parseBlocks(content: string): Block[] {
   return blocks;
 }
 
+// Inline-span pass applied within each block's text: **bold** becomes
+// <strong>, and [bracketed] becomes an accent-colored highlight span (a
+// non-standard extension beyond real Markdown, specific to this app's
+// answer formatting convention). A single regex with two alternatives
+// avoids running two separate passes that would fight over overlapping
+// ranges.
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   const pattern = /\*\*(.+?)\*\*|\[([^[\]]+)\]/g;

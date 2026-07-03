@@ -17,6 +17,12 @@ import {
 import { ScoreChip } from "../../components/ui/ScoreChip";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 
+// Dashboard screen ("/dashboard"). Per CLAUDE.md this page is still seeded:
+// the intended live flow is GET /api/v1/sessions for recents and
+// POST /api/v1/sessions to start a run, then navigate to /session/[id];
+// none of that is wired up here yet — recentSessions/metrics/live-activity
+// are all hardcoded fixtures, and onSubmit below just fakes a delay and
+// navigates with a client-generated UUID instead of calling the API.
 type SessionStatus = "complete" | "writing" | "researching" | "error";
 
 interface RecentSession {
@@ -30,6 +36,7 @@ interface RecentSession {
   active?: boolean;
 }
 
+// Seeded fixture data — stands in for a GET /api/v1/sessions response.
 const recentSessions: RecentSession[] = [
   {
     id: "salesforce-benioff",
@@ -105,6 +112,8 @@ Contact: Patrick Collison, CEO
 Signal: 18% eng headcount growth, 120 open ML roles
 Pain: Manual research taking 4.5h/week per rep`;
 
+// Seeded workspace metrics — no corresponding backend endpoint exists for
+// these at all (not part of the six-endpoint API Contract).
 const metrics = [
   {
     icon: Terminal,
@@ -159,6 +168,10 @@ export default function DashboardPage() {
 
     try {
       setSubmitting(true);
+      // Placeholder for the real flow: POST /api/v1/sessions -> navigate to
+      // /session/[returned sessionId]. Currently just simulates latency and
+      // fabricates a UUID client-side, so the session that /session/[id]
+      // loads next was never actually created on the backend.
       await new Promise((resolve) => setTimeout(resolve, 800));
       router.push(`/session/${crypto.randomUUID()}`);
     } catch (err) {

@@ -1,7 +1,11 @@
+// Horizontally-scrolling row of example-prompt chips shown above the
+// composer; clicking one fills the QueryInput textarea (via onSelect)
+// rather than submitting immediately.
 interface SuggestionChipsProps {
   onSelect: (text: string) => void;
 }
 
+// Fixed example prompts — not derived from indexed playbook content.
 const CHIPS = [
   "What ROI metrics should I lead with for a fintech prospect?",
   "How do I qualify for budget in a PLG motion?",

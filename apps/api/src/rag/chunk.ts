@@ -1,3 +1,8 @@
+// First stage of the RAG ingest pipeline (see routes/documents.ts): splits
+// a document's full text into ~512-word chunks with 64-word overlap before
+// each chunk is embedded and stored in document_chunks. Word-based rather
+// than token-based sizing keeps this dependency-free (no tokenizer
+// library), at the cost of not exactly matching the LLM's own tokenization.
 export interface TextChunk {
   content: string;
   index: number;
@@ -28,6 +33,11 @@ export function chunkText(
     const maxEnd = Math.min(start + size, words.length);
     let end = maxEnd;
 
+    // Prefer breaking on a sentence boundary rather than mid-sentence:
+    // scan backwards from the size-limited cutoff (but no further back than
+    // 60% of the target chunk size) for a word ending in ./!/?, so chunks
+    // stay semantically coherent instead of always being exactly `size`
+    // words long.
     if (maxEnd < words.length) {
       const minSentenceEnd = Math.min(
         maxEnd - 1,
@@ -60,6 +70,9 @@ export function chunkText(
       break;
     }
 
+    // Next chunk starts `overlap` words before this one ended, so context
+    // spanning a chunk boundary isn't lost to retrieval; Math.max guards
+    // against a zero/negative step if a sentence break landed very early.
     start = Math.max(start + 1, end - overlap);
   }
 

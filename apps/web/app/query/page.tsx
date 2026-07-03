@@ -1,5 +1,13 @@
 "use client";
 
+// Query screen ("/query") — per CLAUDE.md, its backend contract is
+// POST /api/v1/query (optionally SSE), but this page is entirely canned:
+// SEED_MESSAGES/CANNED_RESPONSE below are fixtures, and handleSubmit
+// simulates either a streamed or non-streamed reply with setTimeout/
+// setInterval instead of calling lib/api.ts or opening an SSE connection.
+// This is the screen most recently touched by feature/query-screen-rag-chat
+// (the branch this docs branch was cut from) — the presentational layer
+// (components/query/*) is built, but the network call itself is not wired.
 import { Terminal, X } from "lucide-react";
 import { useState } from "react";
 import { MessageThread } from "../../components/query/MessageThread";
@@ -8,6 +16,10 @@ import { QueryInput } from "../../components/query/QueryInput";
 import { SuggestionChips } from "../../components/query/SuggestionChips";
 import type { QueryMessage } from "../../types";
 
+// Fixture thread history — stands in for whatever a real query session's
+// prior turns would be (there is no persistence of query threads on the
+// backend; QueryRequest/QueryResponse in the API Contract are stateless
+// per-call, so even wiring this up would need client-side thread state).
 const SEED_MESSAGES: QueryMessage[] = [
   {
     id: "1",
@@ -73,6 +85,9 @@ const SEED_MESSAGES: QueryMessage[] = [
   },
 ];
 
+// Single fixture answer returned for every query regardless of what was
+// asked — stands in for QueryResponse.answer from a real POST
+// /api/v1/query call.
 const CANNED_RESPONSE = `Based on your indexed playbooks, here's what I found...
 
 **Key insight:** This aligns with your Enterprise SaaS playbook's guidance on handling competitive displacement.
@@ -98,6 +113,9 @@ export default function QueryPlaybooksPage() {
   const [, setIsLoading] = useState(false);
   const [activePlaybook, setActivePlaybook] = useState("All Playbooks");
 
+  // Simulates both response modes the real endpoint supports (stream vs.
+  // non-stream) purely with client-side timers over the one fixed
+  // CANNED_RESPONSE string — no fetch/EventSource call happens here at all.
   function handleSubmit() {
     const trimmed = input.trim();
     if (trimmed.length === 0) {
@@ -234,6 +252,10 @@ export default function QueryPlaybooksPage() {
         onToggleStreaming={() => setIsStreaming((current) => !current)}
       />
 
+      {/* Fixture status line — "text-embedding-3-large" does not match the
+          actual retrieval model: rag/embed.ts uses a local deterministic
+          hashing embedder, not an OpenAI embeddings model. Document/chunk
+          counts are hardcoded too, not read from GET /api/v1/documents. */}
       <p className="mx-auto max-w-[780px] flex-shrink-0 px-6 pb-2 text-center font-mono text-[11px] text-text-secondary">
         Retrieval model: text-embedding-3-large{" "}
         <span className="text-border-active">·</span> 9 documents{" "}

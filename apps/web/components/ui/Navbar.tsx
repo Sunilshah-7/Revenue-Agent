@@ -1,5 +1,10 @@
 "use client";
 
+// Persistent top nav rendered by the root layout on every page. Only links
+// to the three documented product screens (Dashboard/Playbooks/Query) —
+// the "/sessions" and "/settings" stub routes are intentionally not listed
+// here. Notification bell, search, and the user menu are all static/inert
+// UI chrome with no wired behavior.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
