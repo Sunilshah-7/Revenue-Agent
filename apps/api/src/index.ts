@@ -14,6 +14,7 @@ import { healthRouter } from "./routes/health";
 import { documentsRouter } from "./routes/documents";
 import { sessionsRouter } from "./routes/sessions";
 import { queryRouter } from "./routes/query";
+import { createDocsRouter } from "./docs/router";
 import { startEmbedWorker } from "./workers/embed.worker";
 import { startResearchWorker } from "./workers/research.worker";
 import { startWriterWorker } from "./workers/writer.worker";
@@ -234,6 +235,7 @@ const app = new Elysia()
       },
     }),
   )
+  .use(createDocsRouter(api))
   .ws("/ws/session/:id", {
     open(ws) {
       const id = String(ws.data.params.id);
