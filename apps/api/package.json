@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@elysiajs/openapi": "^1.4.15",
     "bullmq": "^5.10.0",
     "elysia": "^1.1.17",
     "hono": "^4.6.5",
