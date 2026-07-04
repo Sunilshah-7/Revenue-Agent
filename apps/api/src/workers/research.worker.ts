@@ -17,6 +17,7 @@ import {
   type RetrievedChunk,
 } from "../rag/retrieve";
 import { redisConnection } from "../redis/client";
+import type { RetrievalTrace } from "../types";
 import { publishSessionEvent, publishSessionStatus } from "../ws/session";
 
 interface ResearchJobData {
@@ -55,7 +56,7 @@ async function persistRetrievalTrace(
     chunks: RetrievedChunk[];
   },
 ): Promise<void> {
-  const trace = {
+  const trace: RetrievalTrace = {
     query: params.query,
     topK: params.topK,
     threshold: MIN_SIMILARITY_THRESHOLD,

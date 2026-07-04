@@ -16,12 +16,31 @@ export interface SessionResponse {
   status: SessionStatus;
 }
 
+export interface RetrievalTraceChunk {
+  doc_id: string;
+  filename: string;
+  chunk_index: number;
+  score: number;
+  preview: string;
+}
+
+export interface RetrievalTrace {
+  query: string;
+  topK: number;
+  threshold: number;
+  playbookId: string | null;
+  totalCandidates: number;
+  truncated: boolean;
+  chunks: RetrievalTraceChunk[];
+}
+
 export interface SessionRecord {
   id: string;
   status: SessionStatus;
   input: SessionInput;
   output: string | null;
   error_message: string | null;
+  retrieval_trace: RetrievalTrace | null;
   created_at: string;
   updated_at: string;
 }

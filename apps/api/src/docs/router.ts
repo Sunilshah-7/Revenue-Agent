@@ -34,6 +34,34 @@ const sessionRecordSchema: OpenAPIV3.SchemaObject = {
     },
     output: { type: "string", nullable: true },
     error_message: { type: "string", nullable: true },
+    retrieval_trace: {
+      type: "object",
+      nullable: true,
+      description:
+        "What the research stage's retrieval step saw — null until it " +
+        "has run for this session.",
+      properties: {
+        query: { type: "string" },
+        topK: { type: "integer" },
+        threshold: { type: "number" },
+        playbookId: { type: "string", format: "uuid", nullable: true },
+        totalCandidates: { type: "integer" },
+        truncated: { type: "boolean" },
+        chunks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              doc_id: { type: "string", format: "uuid" },
+              filename: { type: "string" },
+              chunk_index: { type: "integer" },
+              score: { type: "number" },
+              preview: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     created_at: { type: "string", format: "date-time" },
     updated_at: { type: "string", format: "date-time" },
   },
