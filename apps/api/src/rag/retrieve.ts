@@ -12,6 +12,17 @@ export interface RetrievedChunk {
   metadata: Record<string, unknown>;
 }
 
+// Coarse noise guard, not a precision filter: rag/embed.ts is a lexical
+// hashing embedder (shared word/bigram hash-bucket overlap), not a learned
+// semantic embedding, so its cosine scores don't cleanly separate
+// "relevant" from "irrelevant" — an unrelated query can still score ~0.1-0.14
+// purely from hash collisions (measured locally), while a weakly-related
+// but genuinely on-topic chunk can score ~0.18. This threshold only screens
+// out the near-zero/negative noise floor; retrieval_trace (see
+// research.worker.ts) is the actual diagnostic tool for judging match
+// quality, per Architecture.md's embedding-quality limitation note.
+export const MIN_SIMILARITY_THRESHOLD = 0.1;
+
 export async function retrieveTopChunks(
   query: string,
   topK = 5,
@@ -47,5 +58,21 @@ export async function retrieveTopChunks(
     params,
   );
 
-  return result.rows;
+  return result.rows.filter((row) => row.score >= MIN_SIMILARITY_THRESHOLD);
+}
+
+// Total chunks a retrieval call could have drawn from, for the
+// retrieval_trace's "candidates considered" field — lets a later reader
+// tell "only 2 chunks existed in the whole index" apart from "500 chunks
+// existed and none scored above threshold".
+export async function countIndexedChunks(documentId?: string): Promise<number> {
+  const result = await db.query<{ count: string }>(
+    `
+      SELECT COUNT(*) FROM document_chunks
+      ${documentId ? "WHERE doc_id = $1" : ""}
+    `,
+    documentId ? [documentId] : [],
+  );
+
+  return Number(result.rows[0].count);
 }
