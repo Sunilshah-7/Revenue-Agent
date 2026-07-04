@@ -191,7 +191,7 @@ BullMQ embed.worker
 User triggers "Run Agent" in dashboard
         │
         ▼
-POST /api/v1/sessions { playbookId, prospectContext }
+POST /api/v1/sessions { prospectContext, playbookId? }
         │
         ▼
 OrchestratorAgent.start()
@@ -451,7 +451,8 @@ REDIS_HOST=              # Upstash Redis endpoint
 REDIS_PORT=6379
 REDIS_PASSWORD=          # Upstash Redis password
 REDIS_TLS=true           # Upstash TCP Redis requires TLS
-GROQ_API_KEY=            # Groq API key (free tier)
+GROQ_API_KEY=            # Groq API key (free tier) — required unless USE_MOCK_LLM=true
+USE_MOCK_LLM=false       # Test-only escape hatch; must stay false/unset in Railway
 PORT=3001                # REST + WebSocket upgrade
 FRONTEND_URL=            # Vercel deployment URL (for CORS)
 

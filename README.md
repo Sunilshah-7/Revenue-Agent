@@ -157,10 +157,12 @@ REDIS_HOST=your-db.upstash.io
 REDIS_PORT=6379
 REDIS_PASSWORD=your-upstash-password
 REDIS_TLS=true
-GROQ_API_KEY=gsk_...
+GROQ_API_KEY=gsk_...                # required unless USE_MOCK_LLM=true
 PORT=3001
 FRONTEND_URL=http://localhost:3000
 ```
+
+`USE_MOCK_LLM` (default `false`) is a test-only escape hatch that returns a canned completion instead of calling Groq. Leave it unset here — every dev/prod run must hit the real Groq API. It's set to `true` only in `apps/api/.env.local.example`, and is otherwise activated by the test runner via `NODE_ENV=test`.
 
 **Frontend** — create `apps/web/.env.local`:
 
@@ -245,6 +247,16 @@ For an interactive, browsable version of everything below (with "try it out" aga
 | `POST` | `/api/v1/sessions`     | Start a new agent session             |
 | `GET`  | `/api/v1/sessions/:id` | Get session status and output         |
 | `POST` | `/api/v1/query`        | One-shot RAG query against playbooks  |
+
+**`POST /api/v1/sessions` request body** — `playbookId` is optional (omit it to search across all indexed playbooks):
+
+```json
+{ "prospectContext": "Series B fintech hiring 30 account executives", "playbookId": "7ddf80a5-9807-45a2-a2c3-dac090a83871" }
+```
+
+```json
+{ "sessionId": "1dd1d470-b0ee-4f0f-a48f-f780c0faf25c", "status": "researching" }
+```
 
 ### WebSocket (Elysia — same port via upgrade)
 
