@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import pdfParse from "pdf-parse";
 import { db } from "../db/client";
 import { chunkText } from "../rag/chunk";
-import { embedQueue } from "../workers/queue";
+import { EMBED_JOB_OPTIONS, embedQueue } from "../workers/queue";
 
 export const documentsRouter = new Hono();
 
@@ -37,18 +37,27 @@ documentsRouter.post("/api/v1/documents", async (c) => {
     }
 
     const content = await extractTextFromFile(file);
+    const chunks = chunkText(content, { size: 512, overlap: 64 });
 
+    // A document with zero chunks (empty file, or content that chunkText
+    // can't split) can never receive an embed job and would otherwise sit
+    // in 'processing' forever — fail it immediately instead.
     const documentInsert = await db.query<{ id: string }>(
       `
-        INSERT INTO documents (filename, content)
-        VALUES ($1, $2)
+        INSERT INTO documents (filename, content, status, error_message, chunks_total)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id
       `,
-      [file.name, content],
+      [
+        file.name,
+        content,
+        chunks.length === 0 ? "failed" : "processing",
+        chunks.length === 0 ? "document produced no chunks to embed" : null,
+        chunks.length,
+      ],
     );
 
     const docId = documentInsert.rows[0].id;
-    const chunks = chunkText(content, { size: 512, overlap: 64 });
 
     // One embed job per chunk, enqueued sequentially in a loop (not
     // Promise.all) — this keeps enqueue order stable and avoids bursting
@@ -63,12 +72,7 @@ documentsRouter.post("/api/v1/documents", async (c) => {
           chunkIndex: chunk.index,
           pageHint: chunk.pageHint,
         },
-        {
-          attempts: 3,
-          backoff: { type: "exponential", delay: 500 },
-          removeOnComplete: { age: 3600 },
-          removeOnFail: false,
-        },
+        EMBED_JOB_OPTIONS,
       );
     }
 
@@ -85,14 +89,24 @@ documentsRouter.post("/api/v1/documents", async (c) => {
   }
 });
 
-// Live inventory list — per CLAUDE.md, the Playbooks screen's grid is
-// currently still seeded client-side and not yet wired to this endpoint.
+// Live inventory list, now including ingestion status and the actually-
+// embedded chunk count (not just chunks_total, which is what was expected
+// at upload time) so a document that "exists" but is unsearchable is
+// visibly broken rather than silently present.
 documentsRouter.get("/api/v1/documents", async (c) => {
   const result = await db.query(
     `
-      SELECT id, filename, created_at
-      FROM documents
-      ORDER BY created_at DESC
+      SELECT
+        d.id,
+        d.filename,
+        d.status,
+        d.error_message,
+        COUNT(c.id) FILTER (WHERE c.embedding IS NOT NULL)::int AS chunk_count,
+        d.created_at
+      FROM documents d
+      LEFT JOIN document_chunks c ON c.doc_id = d.id
+      GROUP BY d.id
+      ORDER BY d.created_at DESC
     `,
   );
 

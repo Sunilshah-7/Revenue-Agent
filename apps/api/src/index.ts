@@ -19,6 +19,8 @@ import { startEmbedWorker } from "./workers/embed.worker";
 import { startResearchWorker } from "./workers/research.worker";
 import { startWriterWorker } from "./workers/writer.worker";
 import {
+  embedQueue,
+  embedQueueEvents,
   researchQueue,
   researchQueueEvents,
   writerQueue,
@@ -189,6 +191,71 @@ researchWorker.on("error", (error) => {
 
 embedWorker.on("error", (error) => {
   logger.error("Embed worker runtime error", error.message);
+});
+
+// Flips a document to 'ready' once every one of its chunks has an embedded
+// row — chunks_total was recorded at upload time (routes/documents.ts), so
+// reaching it here means ingestion is actually complete, not just queued.
+// Guarded by `status != 'failed'` so a chunk that finishes after a sibling
+// chunk already failed the document can't resurrect it to 'ready'.
+embedQueueEvents.on("completed", async ({ jobId }) => {
+  if (!jobId) {
+    return;
+  }
+
+  const job = await embedQueue.getJob(jobId);
+  const docId = job?.data.docId as string | undefined;
+  if (!docId) {
+    return;
+  }
+
+  await db.query(
+    `
+      UPDATE documents d
+      SET status = 'ready'
+      WHERE d.id = $1
+        AND d.status != 'failed'
+        AND d.chunks_total <= (
+          SELECT COUNT(*) FROM document_chunks c
+          WHERE c.doc_id = $1 AND c.embedding IS NOT NULL
+        )
+    `,
+    [docId],
+  );
+});
+
+// A chunk's embed job exhausting its retries means that document's index is
+// permanently incomplete — mark it 'failed' with the reason rather than
+// leaving it stuck in 'processing' with no signal anything went wrong.
+// Guarded by `status != 'ready'` for the same reason as above: a
+// already-completed document should not be downgraded by a late/duplicate
+// failure event.
+embedQueueEvents.on("failed", async ({ jobId, failedReason }) => {
+  if (!jobId) {
+    return;
+  }
+
+  const job = await embedQueue.getJob(jobId);
+  const docId = job?.data.docId as string | undefined;
+  if (!docId) {
+    return;
+  }
+
+  logger.error("Embed job failed, marking document failed", {
+    docId,
+    filename: job?.data.filename,
+    chunkIndex: job?.data.chunkIndex,
+    failedReason,
+  });
+
+  await db.query(
+    `
+      UPDATE documents
+      SET status = 'failed', error_message = $2
+      WHERE id = $1 AND status != 'ready'
+    `,
+    [docId, failedReason ?? "Embedding failed"],
+  );
 });
 
 // Subscribes this process to Redis pub/sub channels for session events so

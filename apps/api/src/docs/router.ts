@@ -117,8 +117,10 @@ export function createDocsRouter(api: Hono) {
         tags: ["Documents"],
         summary: "List indexed documents",
         description:
-          "Live inventory ordered by most recently created. Per CLAUDE.md, " +
-          "the Playbooks screen's grid does not call this endpoint yet.",
+          "Live inventory ordered by most recently created, including " +
+          "ingestion status and the actually-embedded chunk count so a " +
+          "document that failed or is still processing is visibly " +
+          "distinguishable from one that is fully searchable.",
         responses: {
           "200": {
             description: "Indexed documents.",
@@ -134,6 +136,12 @@ export function createDocsRouter(api: Hono) {
                         properties: {
                           id: { type: "string", format: "uuid" },
                           filename: { type: "string" },
+                          status: {
+                            type: "string",
+                            enum: ["processing", "ready", "failed"],
+                          },
+                          error_message: { type: "string", nullable: true },
+                          chunk_count: { type: "integer" },
                           created_at: {
                             type: "string",
                             format: "date-time",
