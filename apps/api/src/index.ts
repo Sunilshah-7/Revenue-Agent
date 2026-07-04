@@ -61,6 +61,29 @@ const embedWorker = startEmbedWorker();
 const researchWorker = startResearchWorker();
 const writerWorker = startWriterWorker();
 
+// Shared by every failure path below (research job failure, writer job
+// failure, and an exception inside the research "completed" handler
+// itself) so a session is never left stuck in "researching"/"writing" —
+// two rows previously got stuck that way because the "completed" handler
+// below had no try/catch: its own DB update or writerQueue.add() could
+// throw after the research job had already succeeded, so BullMQ's "failed"
+// event never fired for it and nothing else marked the session as errored.
+async function markSessionError(
+  sessionId: string,
+  message: string,
+): Promise<void> {
+  await db.query(
+    `
+      UPDATE sessions
+      SET status = 'error', error_message = $2, updated_at = NOW()
+      WHERE id = $1
+    `,
+    [sessionId, message],
+  );
+
+  await publishSessionEvent(sessionId, { type: "error", message });
+}
+
 // This listener is the hinge of the orchestration pipeline: it is what
 // advances a session from "researching" to "writing" once the research
 // worker's job resolves, by reading the research summary out of the job's
@@ -81,35 +104,46 @@ researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
   const sessionId = job.data.sessionId as string;
   const prospectContext = job.data.input.prospectContext;
 
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'writing', updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId],
-  );
+  try {
+    await db.query(
+      `
+        UPDATE sessions
+        SET status = 'writing', updated_at = NOW()
+        WHERE id = $1
+      `,
+      [sessionId],
+    );
 
-  await publishSessionStatus(sessionId, "writing");
+    await publishSessionStatus(sessionId, "writing");
 
-  // Retries/backoff/removeOnFail are set per-enqueue rather than as a queue
-  // default so the writer stage's retry policy can diverge from research's
-  // if needed; removeOnFail: false keeps failed writer jobs around for
-  // inspection instead of silently discarding them.
-  await writerQueue.add(
-    "write",
-    {
+    // Retries/backoff/removeOnFail are set per-enqueue rather than as a
+    // queue default so the writer stage's retry policy can diverge from
+    // research's if needed; removeOnFail: false keeps failed writer jobs
+    // around for inspection instead of silently discarding them.
+    await writerQueue.add(
+      "write",
+      {
+        sessionId,
+        prospectContext,
+        researchSummary: String(returnvalue ?? ""),
+      },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 500 },
+        removeOnComplete: { age: 3600 },
+        removeOnFail: false,
+      },
+    );
+  } catch (error) {
+    logger.error("Failed to hand research result off to writer queue", {
       sessionId,
-      prospectContext,
-      researchSummary: String(returnvalue ?? ""),
-    },
-    {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 500 },
-      removeOnComplete: { age: 3600 },
-      removeOnFail: false,
-    },
-  );
+      error,
+    });
+    await markSessionError(
+      sessionId,
+      error instanceof Error ? error.message : "Failed to enqueue writer job",
+    );
+  }
 });
 
 // If research itself fails (after its own retries are exhausted), the
@@ -126,19 +160,7 @@ researchQueueEvents.on("failed", async ({ jobId, failedReason }) => {
     return;
   }
 
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'error', error_message = $2, updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId, failedReason ?? "Research failed"],
-  );
-
-  await publishSessionEvent(sessionId, {
-    type: "error",
-    message: failedReason ?? "Research failed",
-  });
+  await markSessionError(sessionId, failedReason ?? "Research failed");
 });
 
 // Mirror of the research-failure handler, but bound directly to the writer
@@ -151,19 +173,7 @@ writerWorker.on("failed", async (job, error) => {
     return;
   }
 
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'error', error_message = $2, updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId, error.message],
-  );
-
-  await publishSessionEvent(sessionId, {
-    type: "error",
-    message: error.message,
-  });
+  await markSessionError(sessionId, error.message);
 });
 
 // "error" events are BullMQ/Redis-connection-level failures (distinct from
