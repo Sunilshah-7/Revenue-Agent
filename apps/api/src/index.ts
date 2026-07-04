@@ -4,6 +4,7 @@
 // Everything below runs once at module load (Bun executes this top-to-bottom
 // and then keeps the process alive via the listeners/servers it starts).
 import { Elysia } from "elysia";
+import { openapi } from "@elysiajs/openapi";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { db } from "./db/client";
@@ -13,6 +14,7 @@ import { healthRouter } from "./routes/health";
 import { documentsRouter } from "./routes/documents";
 import { sessionsRouter } from "./routes/sessions";
 import { queryRouter } from "./routes/query";
+import { createDocsRouter } from "./docs/router";
 import { startEmbedWorker } from "./workers/embed.worker";
 import { startResearchWorker } from "./workers/research.worker";
 import { startWriterWorker } from "./workers/writer.worker";
@@ -189,7 +191,55 @@ await initializeSessionEventBridge();
 // map in ws/session.ts; the catch-all "/*" route hands everything else off
 // to the Hono `api` app's fetch handler, so one process serves both
 // protocols on one port.
+//
+// @elysiajs/openapi only generates docs from routes declared natively on
+// this Elysia instance — it cannot see the Hono routes hidden behind the
+// catch-all below. Endpoint documentation is added separately (see
+// docs/router.ts) as thin passthrough routes that carry OpenAPI metadata
+// and delegate straight back into `api.fetch(request)`; this `.use()` just
+// mounts the docs UI itself at GET /openapi (Scalar, the plugin default)
+// and GET /openapi/json (raw OpenAPI document).
 const app = new Elysia()
+  .use(
+    openapi({
+      documentation: {
+        info: {
+          title: "ARAP API",
+          version: "v2.4",
+          description:
+            "REST and WebSocket contract for the AI Revenue Agent Platform. " +
+            "`/ws/session/:id` below is listed as a bare path — OpenAPI " +
+            "3.0 has no request/response semantics for WebSocket " +
+            "operations, so its `token`/`status`/`error`/`done` event " +
+            "shapes are documented in prose on the Sessions tag instead.",
+        },
+        tags: [
+          {
+            name: "Documents",
+            description: "Playbook upload and inventory.",
+          },
+          {
+            name: "Sessions",
+            description:
+              "Agent session lifecycle. Also see /ws/session/:id, which " +
+              'streams { type: "token" | "status" | "error" | "done", ... } ' +
+              "events for a session over WebSocket once a run starts.",
+          },
+          {
+            name: "Query",
+            description: "One-shot RAG query against playbooks.",
+          },
+          { name: "Health", description: "Operational health check." },
+        ],
+      },
+      // The Hono catch-all is itself a native Elysia route (`.all("/*",
+      // ...)` below) and would otherwise show up as a phantom "every
+      // method" entry in the generated docs; every path it actually
+      // forwards is already documented individually via docs/router.ts.
+      exclude: { paths: ["/*"] },
+    }),
+  )
+  .use(createDocsRouter(api))
   .ws("/ws/session/:id", {
     open(ws) {
       const id = String(ws.data.params.id);

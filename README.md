@@ -190,7 +190,8 @@ bun run dev
 
 Frontend: `http://localhost:3000`  
 Backend API: `http://localhost:3001`  
-WebSocket: `ws://localhost:3001/ws/session/:id`
+WebSocket: `ws://localhost:3001/ws/session/:id`  
+Interactive API docs: `http://localhost:3001/openapi`
 
 ---
 
@@ -230,6 +231,8 @@ curl https://your-railway-url/health
 ---
 
 ## API Reference
+
+For an interactive, browsable version of everything below (with "try it out" against a running server), start the API and visit `/openapi`.
 
 ### REST (Hono — port 3001)
 
