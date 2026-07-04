@@ -2,14 +2,15 @@
 
 // Playbooks screen ("/playbooks") — upload and inventory are both wired to
 // the real backend: uploadDocument() posts to POST /api/v1/documents, and
-// the grid below renders GET /api/v1/documents results directly. The
-// backend document schema only stores { id, filename, created_at }, so no
-// file size/type/status/chunk/session counts are shown — none of that
-// exists server-side.
+// the grid below renders GET /api/v1/documents results directly, including
+// ingestion status and embedded chunk count so a document that failed or
+// is still processing is visibly distinguishable from one that's fully
+// searchable.
 import { ChangeEvent, DragEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Calendar, FileText, Loader2, Upload, UploadCloud } from "lucide-react";
+import { Calendar, FileText, Layers, Loader2, Upload, UploadCloud } from "lucide-react";
 import { listDocuments, uploadDocument } from "../../lib/api";
 import { formatRelativeTime } from "../../lib/format";
+import { DocumentStatusBadge } from "../../components/ui/DocumentStatusBadge";
 import type { DocumentRecord } from "../../types";
 
 type ToastState = { filename: string; phase: "uploading" | "queued" } | null;
@@ -38,7 +39,18 @@ function DocumentCard({ document }: { document: DocumentRecord }) {
         <span className="rounded border border-accent-primary/40 px-1.5 py-0.5 font-mono text-[10px] font-bold text-text-accent">
           {extensionOf(document.filename)}
         </span>
+        <DocumentStatusBadge status={document.status} />
+        <span className="inline-flex items-center gap-1 text-[11px] text-text-secondary">
+          <Layers className="h-2.5 w-2.5" />
+          {document.chunk_count} chunk{document.chunk_count === 1 ? "" : "s"}
+        </span>
       </div>
+
+      {document.status === "failed" && document.error_message ? (
+        <p className="mt-2 rounded-md border border-red-error/30 bg-red-error/10 px-2 py-1 text-[11px] text-red-error">
+          {document.error_message}
+        </p>
+      ) : null}
 
       <footer className="mt-4 flex items-center gap-1.5 text-[11px] text-text-secondary">
         <Calendar className="h-2.5 w-2.5" />

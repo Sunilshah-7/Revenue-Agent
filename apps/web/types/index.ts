@@ -49,9 +49,14 @@ export interface ListSessionsResponse {
   sessions: SessionRecord[];
 }
 
+export type DocumentStatus = "processing" | "ready" | "failed";
+
 export interface DocumentRecord {
   id: string;
   filename: string;
+  status: DocumentStatus;
+  error_message: string | null;
+  chunk_count: number;
   created_at: string;
 }
 
