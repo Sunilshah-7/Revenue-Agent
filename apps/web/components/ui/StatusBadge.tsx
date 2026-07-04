@@ -1,21 +1,25 @@
-// Five-variant status badge (per the Key Files Map) shared across the
-// seeded Dashboard/Playbooks/Live-Session screens. Note the fifth variant,
-// "live", is UI-only pulse styling with no icon/config entry — it isn't a
-// SessionStatus value from the backend at all.
+// Status badge covering the real backend SessionStatus values exactly
+// (idle | researching | writing | complete | error) — no UI-only variants.
 import {
   CheckCircle,
+  Clock,
   Loader2,
   XCircle,
   Zap,
   type LucideIcon,
 } from "lucide-react";
-
-type Status = "complete" | "writing" | "researching" | "error" | "live";
+import type { SessionStatus } from "../../types";
 
 const statusConfig: Record<
-  Exclude<Status, "live">,
+  SessionStatus,
   { label: string; icon: LucideIcon; className: string; spin?: boolean }
 > = {
+  idle: {
+    label: "Idle",
+    icon: Clock,
+    className:
+      "border-border-active/60 bg-bg-elevated text-text-secondary",
+  },
   complete: {
     label: "Complete",
     icon: CheckCircle,
@@ -42,16 +46,7 @@ const statusConfig: Record<
   },
 };
 
-export function StatusBadge({ status }: { status: Status }) {
-  if (status === "live") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-badge px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-green-active">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-green-active" />
-        Live
-      </span>
-    );
-  }
-
+export function StatusBadge({ status }: { status: SessionStatus }) {
   const config = statusConfig[status];
   const Icon = config.icon;
 

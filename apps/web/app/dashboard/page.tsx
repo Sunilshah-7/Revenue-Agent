@@ -1,185 +1,94 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  BookOpen,
-  ChevronDown,
-  Clock,
-  Database,
-  Loader2,
-  Play,
-  Plus,
-  Sparkles,
-  Terminal,
-  Timer,
-} from "lucide-react";
-import { ScoreChip } from "../../components/ui/ScoreChip";
+import { Clock, Database, Loader2, Play, Plus, Sparkles, Terminal } from "lucide-react";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { listDocuments, listSessions, startSession } from "../../lib/api";
+import { formatRelativeTime } from "../../lib/format";
+import type { SessionRecord } from "../../types";
 
-// Dashboard screen ("/dashboard"). Per CLAUDE.md this page is still seeded:
-// the intended live flow is GET /api/v1/sessions for recents and
-// POST /api/v1/sessions to start a run, then navigate to /session/[id];
-// none of that is wired up here yet — recentSessions/metrics/live-activity
-// are all hardcoded fixtures, and onSubmit below just fakes a delay and
-// navigates with a client-generated UUID instead of calling the API.
-type SessionStatus = "complete" | "writing" | "researching" | "error";
+const SESSIONS_POLL_INTERVAL_MS = 12_000;
 
-interface RecentSession {
-  id: string;
-  company: string;
-  contact: string;
-  playbook: string;
-  time: string;
-  status: SessionStatus;
-  score?: number;
-  active?: boolean;
-}
-
-// Seeded fixture data — stands in for a GET /api/v1/sessions response.
-const recentSessions: RecentSession[] = [
-  {
-    id: "salesforce-benioff",
-    company: "Salesforce",
-    contact: "Marc Benioff",
-    playbook: "Enterprise SaaS",
-    time: "2m ago",
-    status: "complete",
-    score: 94,
-    active: true,
-  },
-  {
-    id: "anthropic-amodei",
-    company: "Anthropic",
-    contact: "Dario Amodei",
-    playbook: "AI Infrastructure",
-    time: "8m ago",
-    status: "writing",
-  },
-  {
-    id: "stripe-collison",
-    company: "Stripe",
-    contact: "Patrick Collison",
-    playbook: "Fintech Growth",
-    time: "14m ago",
-    status: "researching",
-  },
-  {
-    id: "vercel-rauch",
-    company: "Vercel",
-    contact: "Guillermo Rauch",
-    playbook: "Developer Tools",
-    time: "1h ago",
-    status: "complete",
-    score: 87,
-  },
-  {
-    id: "linear-saarinen",
-    company: "Linear",
-    contact: "Karri Saarinen",
-    playbook: "Product-Led Growth",
-    time: "2h ago",
-    status: "error",
-  },
-  {
-    id: "figma-field",
-    company: "Figma",
-    contact: "Dylan Field",
-    playbook: "Design Tools",
-    time: "3h ago",
-    status: "complete",
-    score: 91,
-  },
-  {
-    id: "notion-zhao",
-    company: "Notion",
-    contact: "Ivan Zhao",
-    playbook: "Productivity SaaS",
-    time: "5h ago",
-    status: "complete",
-    score: 88,
-  },
-];
-
-const quickFills = [
-  "+ Series B SaaS company",
-  "+ Enterprise prospect, 500+ employees",
-  "+ Competitor displacement",
-];
-
-const defaultContext = `Company: Stripe
-Contact: Patrick Collison, CEO
-Signal: 18% eng headcount growth, 120 open ML roles
-Pain: Manual research taking 4.5h/week per rep`;
-
-// Seeded workspace metrics — no corresponding backend endpoint exists for
-// these at all (not part of the six-endpoint API Contract).
-const metrics = [
-  {
-    icon: Terminal,
-    trend: "↗ +18% this week",
-    value: "1,284",
-    label: "Sessions Run",
-    detail: "across 3 workspaces",
-  },
-  {
-    icon: Database,
-    trend: "↗ +2,341 today",
-    value: "94,712",
-    label: "Docs Indexed",
-    detail: "across 7 data sources",
-  },
-  {
-    icon: Timer,
-    trend: "↘ −23s from last week",
-    value: "1m 42s",
-    label: "Avg. Generation Time",
-    detail: "p95: 4m 07s",
-  },
-];
-
-function Sparkline() {
-  return (
-    <svg
-      viewBox="0 0 220 32"
-      aria-hidden="true"
-      className="mt-4 h-8 w-full text-green-active/45"
-    >
-      <path
-        d="M2 25 C 20 22, 28 15, 44 17 S 73 29, 92 19 122 5, 144 12 173 24, 193 14 218 7"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="2"
-      />
-    </svg>
-  );
+function sessionLabel(session: SessionRecord): string {
+  const firstLine = session.input.prospectContext.split("\n")[0]?.trim() ?? "";
+  if (firstLine.length === 0) {
+    return "Untitled session";
+  }
+  return firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
 }
 
 export default function DashboardPage() {
   const router = useRouter();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const [prospectContext, setProspectContext] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [documentCount, setDocumentCount] = useState<number | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [sessionsResult, documentsResult] = await Promise.all([
+        listSessions(),
+        listDocuments(),
+      ]);
+      setSessions(sessionsResult);
+      setDocumentCount(documentsResult.length);
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(
+        err instanceof Error ? err.message : "Failed to reach the backend",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), SESSIONS_POLL_INTERVAL_MS);
+    window.addEventListener("focus", refresh);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refresh]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError(null);
+    setFormError(null);
+
+    const trimmed = prospectContext.trim();
+    if (trimmed.length === 0) {
+      setFormError("Prospect context is required.");
+      return;
+    }
 
     try {
       setSubmitting(true);
-      // Placeholder for the real flow: POST /api/v1/sessions -> navigate to
-      // /session/[returned sessionId]. Currently just simulates latency and
-      // fabricates a UUID client-side, so the session that /session/[id]
-      // loads next was never actually created on the backend.
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      router.push(`/session/${crypto.randomUUID()}`);
+      const result = await startSession({ prospectContext: trimmed });
+      router.push(`/dashboard/${result.sessionId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start agent");
+      setFormError(
+        err instanceof Error ? err.message : "Failed to start agent session",
+      );
     } finally {
       setSubmitting(false);
     }
   }
+
+  const activeCount = sessions.filter(
+    (s) => s.status === "researching" || s.status === "writing",
+  ).length;
+
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
 
   return (
     <div className="min-h-screen bg-bg-base pt-[52px] text-text-primary">
@@ -191,50 +100,42 @@ export default function DashboardPage() {
           <button
             type="button"
             aria-label="New session"
+            onClick={() => textareaRef.current?.focus()}
             className="rounded-md p-1 text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className="space-y-1">
-          {recentSessions.map((session) => (
-            <button
-              key={`${session.company}-${session.contact}`}
-              type="button"
-              onClick={() => router.push(`/session/${session.id}`)}
-              className={`w-full rounded-md px-3 py-2.5 text-left transition-colors hover:bg-bg-elevated ${
-                session.active
-                  ? "border-l-2 border-accent-primary bg-bg-elevated"
-                  : "border-l-2 border-transparent"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-semibold text-text-primary">
-                  {session.company}
-                </span>
-                <StatusBadge status={session.status} />
-              </div>
-              <p className="mt-1 truncate text-xs text-text-secondary">
-                {session.contact}
-              </p>
-              <div className="mt-1 flex items-center justify-between gap-2">
-                <span className="truncate font-mono text-[11px] text-text-secondary">
-                  {session.playbook}
-                </span>
-                <span className="flex shrink-0 items-center gap-1 text-[11px] text-text-secondary">
-                  <Clock className="h-3 w-3" />
-                  {session.time}
-                </span>
-              </div>
-              {session.status === "complete" && session.score ? (
-                <div className="mt-2 flex justify-end">
-                  <ScoreChip score={session.score} />
+        {sessions.length === 0 ? (
+          <p className="px-1 text-[13px] text-text-secondary">
+            No sessions yet — run your first agent.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {sessions.slice(0, 10).map((session) => (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => router.push(`/dashboard/${session.id}`)}
+                className="w-full rounded-md border-l-2 border-transparent px-3 py-2.5 text-left transition-colors hover:bg-bg-elevated"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold text-text-primary">
+                    {sessionLabel(session)}
+                  </span>
+                  <StatusBadge status={session.status} />
                 </div>
-              ) : null}
-            </button>
-          ))}
-        </div>
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <span className="flex shrink-0 items-center gap-1 text-[11px] text-text-secondary">
+                    <Clock className="h-3 w-3" />
+                    {formatRelativeTime(session.created_at)}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
       </aside>
 
       <main className="ml-[280px] min-h-[calc(100vh-52px)] p-8">
@@ -244,14 +145,24 @@ export default function DashboardPage() {
               Dashboard
             </h1>
             <p className="mt-1 text-sm text-text-secondary">
-              Thursday, June 26 ·{" "}
-              <span className="text-text-accent">3 agents active</span>
+              {today}
+              {activeCount > 0 ? (
+                <>
+                  {" · "}
+                  <span className="text-text-accent">
+                    {activeCount} agent{activeCount === 1 ? "" : "s"} active
+                  </span>
+                </>
+              ) : null}
             </p>
           </div>
-          <span className="rounded-md border border-border-subtle bg-bg-elevated px-3 py-1 font-mono text-xs text-text-secondary">
-            workspace: growth-team
-          </span>
         </div>
+
+        {loadError ? (
+          <p className="mt-4 rounded-md border border-red-error/30 bg-red-error/10 px-3 py-2 text-xs text-red-error">
+            {loadError}
+          </p>
+        ) : null}
 
         <form
           onSubmit={onSubmit}
@@ -264,8 +175,8 @@ export default function DashboardPage() {
             </h2>
           </div>
           <p className="mt-1 text-[13px] text-text-secondary">
-            Paste prospect context and the agent will research, score, and
-            generate a tailored business case.
+            Paste prospect context and the agent will research and generate a
+            tailored business case.
           </p>
 
           <label
@@ -275,29 +186,16 @@ export default function DashboardPage() {
             Prospect Context
           </label>
           <textarea
+            ref={textareaRef}
             id="prospect-context"
             rows={5}
             value={prospectContext}
             onChange={(event) => setProspectContext(event.target.value)}
-            placeholder={defaultContext}
+            placeholder={"Company: Acme Corp\nContact: Jane Doe, VP Sales\nSignal: ...\nPain: ..."}
             className="mt-2 w-full resize-none rounded-md border border-border-subtle bg-bg-elevated p-3 font-mono text-[13px] leading-5 text-text-mono placeholder:text-text-secondary focus:border-accent-primary focus:outline-none focus:ring-1 focus:ring-accent-primary/30"
           />
 
-          <div className="mt-4 flex items-end gap-4">
-            <div className="min-w-0 flex-1">
-              <label className="block text-[11px] font-medium uppercase tracking-[0.2em] text-text-secondary">
-                Playbook
-              </label>
-              <button
-                type="button"
-                className="mt-2 flex w-full items-center gap-2 rounded-md border border-border-subtle bg-bg-elevated px-3 py-2.5 text-sm text-text-primary transition-colors hover:border-border-active"
-              >
-                <BookOpen className="h-3.5 w-3.5 text-accent-primary" />
-                <span>Enterprise SaaS</span>
-                <ChevronDown className="ml-auto h-3.5 w-3.5 text-text-secondary" />
-              </button>
-            </div>
-
+          <div className="mt-4 flex items-end justify-end gap-4">
             <button
               type="submit"
               disabled={submitting}
@@ -312,57 +210,41 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
-            {quickFills.map((chip) => (
-              <button
-                key={chip}
-                type="button"
-                onClick={() =>
-                  setProspectContext((current) =>
-                    current.trim().length > 0 ? `${current}\n${chip}` : chip,
-                  )
-                }
-                className="rounded-full border border-border-subtle px-2.5 py-1 text-xs text-text-secondary transition-colors hover:border-accent-primary hover:text-accent-primary"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
-
-          {error ? (
-            <p className="mt-3 text-xs text-red-error">{error}</p>
+          {formError ? (
+            <p className="mt-3 text-xs text-red-error">{formError}</p>
           ) : null}
         </form>
 
         <section className="mt-6 grid grid-cols-3 gap-4">
-          {metrics.map((metric) => {
-            const Icon = metric.icon;
-            return (
-              <article
-                key={metric.label}
-                className="rounded-card border border-border-subtle bg-bg-surface p-5"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-md bg-bg-elevated text-text-secondary">
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className="text-[11px] font-medium text-green-active">
-                    {metric.trend}
-                  </span>
-                </div>
-                <p className="mt-5 text-[38px] font-bold leading-none text-text-primary">
-                  {metric.value}
-                </p>
-                <p className="mt-2 text-[13px] text-text-secondary">
-                  {metric.label}
-                </p>
-                <p className="mt-1 text-[11px] text-text-secondary">
-                  {metric.detail}
-                </p>
-                <Sparkline />
-              </article>
-            );
-          })}
+          <article className="rounded-card border border-border-subtle bg-bg-surface p-5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-bg-elevated text-text-secondary">
+              <Terminal className="h-4 w-4" />
+            </span>
+            <p className="mt-5 text-[38px] font-bold leading-none text-text-primary">
+              {sessions.length}
+            </p>
+            <p className="mt-2 text-[13px] text-text-secondary">Sessions Run</p>
+          </article>
+
+          <article className="rounded-card border border-border-subtle bg-bg-surface p-5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-bg-elevated text-text-secondary">
+              <Database className="h-4 w-4" />
+            </span>
+            <p className="mt-5 text-[38px] font-bold leading-none text-text-primary">
+              {documentCount ?? "—"}
+            </p>
+            <p className="mt-2 text-[13px] text-text-secondary">Docs Indexed</p>
+          </article>
+
+          <article className="rounded-card border border-border-subtle bg-bg-surface p-5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-md bg-bg-elevated text-text-secondary">
+              <Loader2 className="h-4 w-4" />
+            </span>
+            <p className="mt-5 text-[38px] font-bold leading-none text-text-primary">
+              {activeCount}
+            </p>
+            <p className="mt-2 text-[13px] text-text-secondary">Agents Active</p>
+          </article>
         </section>
 
         <section className="mt-8">
@@ -370,42 +252,40 @@ export default function DashboardPage() {
             <h2 className="text-[11px] font-medium uppercase tracking-[0.2em] text-text-secondary">
               Live Activity
             </h2>
-            <button
-              type="button"
-              className="text-xs text-text-accent transition-colors hover:underline"
-            >
-              View all ›
-            </button>
           </div>
 
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="border-b border-border-subtle text-left text-[11px] uppercase tracking-[0.2em] text-text-secondary">
-                <th className="pb-2 font-medium">Company</th>
-                <th className="pb-2 font-medium">Contact</th>
-                <th className="pb-2 font-medium">Playbook</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium">Score</th>
-                <th className="pb-2 text-right font-medium">Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className="border-b border-border-subtle text-sm text-text-primary">
-                <td className="py-3 font-medium">Salesforce</td>
-                <td className="py-3 text-text-secondary">Marc Benioff</td>
-                <td className="py-3 font-mono text-xs text-text-secondary">
-                  Enterprise SaaS
-                </td>
-                <td className="py-3">
-                  <StatusBadge status="complete" />
-                </td>
-                <td className="py-3">
-                  <ScoreChip score={94} />
-                </td>
-                <td className="py-3 text-right text-text-secondary">2m ago</td>
-              </tr>
-            </tbody>
-          </table>
+          {sessions.length === 0 ? (
+            <p className="text-sm text-text-secondary">
+              No sessions yet — run your first agent above.
+            </p>
+          ) : (
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="border-b border-border-subtle text-left text-[11px] uppercase tracking-[0.2em] text-text-secondary">
+                  <th className="pb-2 font-medium">Prospect Context</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 text-right font-medium">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sessions.map((session) => (
+                  <tr
+                    key={session.id}
+                    onClick={() => router.push(`/dashboard/${session.id}`)}
+                    className="cursor-pointer border-b border-border-subtle text-sm text-text-primary hover:bg-bg-elevated"
+                  >
+                    <td className="py-3 font-medium">{sessionLabel(session)}</td>
+                    <td className="py-3">
+                      <StatusBadge status={session.status} />
+                    </td>
+                    <td className="py-3 text-right text-text-secondary">
+                      {formatRelativeTime(session.created_at)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </section>
       </main>
     </div>

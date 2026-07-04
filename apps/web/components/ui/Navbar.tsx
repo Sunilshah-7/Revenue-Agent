@@ -3,19 +3,11 @@
 // Persistent top nav rendered by the root layout on every page. Only links
 // to the three documented product screens (Dashboard/Playbooks/Query) —
 // the "/sessions" and "/settings" stub routes are intentionally not listed
-// here. Notification bell, search, and the user menu are all static/inert
-// UI chrome with no wired behavior.
+// here. There is no auth, notifications, or search in the backend, so none
+// of that chrome is rendered.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Bell,
-  BookOpen,
-  ChevronDown,
-  LayoutDashboard,
-  Search,
-  Sparkles,
-  Terminal,
-} from "lucide-react";
+import { BookOpen, LayoutDashboard, Sparkles, Terminal } from "lucide-react";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
@@ -59,42 +51,6 @@ export function Navbar() {
             );
           })}
         </nav>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="relative text-text-secondary transition-colors hover:text-text-primary"
-        >
-          <Bell className="h-4 w-4" />
-          <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-accent-primary" />
-        </button>
-        <button
-          type="button"
-          aria-label="Search"
-          className="text-text-secondary transition-colors hover:text-text-primary"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-
-        <button
-          type="button"
-          className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-bg-elevated"
-        >
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-primary text-[11px] font-bold text-white">
-            JD
-          </span>
-          <span className="hidden text-left leading-tight sm:block">
-            <span className="block text-[13px] font-medium text-text-primary">
-              Jamie Dawson
-            </span>
-            <span className="block text-[11px] text-text-secondary">
-              Growth Team
-            </span>
-          </span>
-          <ChevronDown className="h-3.5 w-3.5 text-text-secondary" />
-        </button>
       </div>
     </header>
   );
