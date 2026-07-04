@@ -1,10 +1,7 @@
-// A second, actually-live session-detail route at "/dashboard/[sessionId]"
-// — distinct from the documented "/session/[id]" Live Session screen in
-// CLAUDE.md, which is still seeded/simulated. This one is a real React
-// Server Component: it calls getSession() server-side against the real
-// GET /api/v1/sessions/:id proxy before rendering, then hands off to the
-// client-side StreamPanel (which opens the real WebSocket) for live output.
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { StreamPanel } from "../../../components/StreamPanel";
+import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { getSession } from "../../../lib/api";
 
 export default async function SessionDashboardPage({
@@ -15,15 +12,45 @@ export default async function SessionDashboardPage({
   const session = await getSession(params.sessionId);
 
   return (
-    <main className="grid" style={{ gap: 16 }}>
-      <section className="card grid" style={{ gap: 8 }}>
-        <h1 style={{ margin: 0 }}>Session Dashboard</h1>
-        <p style={{ margin: 0 }}>
-          Session ID: <strong>{session.id}</strong>
-        </p>
-      </section>
+    <main className="min-h-screen bg-bg-base px-8 pt-[84px] pb-8 text-text-primary">
+      <div className="mx-auto max-w-[900px]">
+        <Link
+          href="/dashboard"
+          className="inline-flex items-center gap-2 text-[13px] text-text-secondary transition-colors hover:text-text-primary"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Dashboard
+        </Link>
 
-      <StreamPanel sessionId={session.id} initialOutput={session.output} />
+        <section className="mt-4 rounded-card border border-border-subtle bg-bg-surface p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold text-text-primary">
+                Agent Session
+              </h1>
+              <p className="mt-1 font-mono text-xs text-text-secondary">
+                {session.id}
+              </p>
+            </div>
+            <StatusBadge status={session.status} />
+          </div>
+
+          <pre className="mt-4 whitespace-pre-wrap break-words rounded-md border border-border-subtle bg-bg-elevated p-3 font-mono text-[13px] leading-5 text-text-mono">
+            {session.input.prospectContext}
+          </pre>
+        </section>
+
+        <div className="mt-4">
+          <StreamPanel
+            sessionId={session.id}
+            initialStatus={session.status}
+            initialOutput={session.output}
+            initialErrorMessage={session.error_message}
+            createdAt={session.created_at}
+            updatedAt={session.updated_at}
+          />
+        </div>
+      </div>
     </main>
   );
 }

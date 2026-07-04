@@ -1,10 +1,4 @@
-// Frontend wire types (per the Key Files Map) — must stay aligned with the
-// API Contract and with apps/api/src/types.ts on the backend. This is the
-// set actually used by the real/wired frontend paths (lib/api.ts,
-// lib/ws-client.ts, StreamPanel); the still-seeded pages define their own
-// local fixture-shaped types instead of importing from here (e.g.
-// dashboard/page.tsx's RecentSession, query/page.tsx's QueryMessage import
-// is real, but its content is fixture data).
+// Frontend wire types — must stay aligned with apps/api/src/types.ts.
 export type SessionStatus =
   | "idle"
   | "researching"
@@ -12,19 +6,38 @@ export type SessionStatus =
   | "complete"
   | "error";
 
+export interface SessionInput {
+  playbookId?: string;
+  prospectContext: string;
+}
+
 export interface SessionResponse {
   sessionId: string;
   status: SessionStatus;
 }
 
-export interface SessionDetail {
+export interface SessionRecord {
   id: string;
   status: SessionStatus;
-  input: Record<string, unknown>;
+  input: SessionInput;
   output: string | null;
   error_message: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ListSessionsResponse {
+  sessions: SessionRecord[];
+}
+
+export interface DocumentRecord {
+  id: string;
+  filename: string;
+  created_at: string;
+}
+
+export interface ListDocumentsResponse {
+  documents: DocumentRecord[];
 }
 
 export type WsMessage =

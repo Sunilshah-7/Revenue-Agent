@@ -1,8 +1,13 @@
-// Typed frontend API calls (per the Key Files Map) — every function here
-// calls a same-origin Next.js proxy route (/api/documents, /api/sessions,
-// /api/sessions/:id), never the Hono backend directly. This is what keeps
-// NEXT_PUBLIC_API_URL server-side-only in normal operation.
-import type { SessionDetail, SessionResponse } from "../types";
+// Typed frontend API calls — every function here calls a same-origin
+// Next.js proxy route (/api/documents, /api/sessions, /api/sessions/:id),
+// never the Hono backend directly. This keeps NEXT_PUBLIC_API_URL
+// server-side-only in normal operation.
+import type {
+  DocumentRecord,
+  SessionInput,
+  SessionRecord,
+  SessionResponse,
+} from "../types";
 
 // Resolves the base URL to fetch *this* Next.js app's own proxy routes
 // from. In the browser, a relative path ("") is enough since fetch resolves
@@ -45,11 +50,7 @@ export async function uploadDocument(
   return response.json();
 }
 
-// Not currently called from any page — the Playbooks screen's grid still
-// renders seeded data instead of using this.
-export async function listDocuments(): Promise<
-  Array<{ id: string; filename: string; created_at: string }>
-> {
+export async function listDocuments(): Promise<DocumentRecord[]> {
   const response = await fetch(`${apiBase()}/api/documents`, {
     cache: "no-store",
   });
@@ -61,13 +62,9 @@ export async function listDocuments(): Promise<
   return json.documents;
 }
 
-// Not currently called from any page either — the Dashboard's onSubmit
-// still fabricates a client-side UUID instead of using this to create a
-// real session.
-export async function startSession(payload: {
-  playbookId?: string;
-  prospectContext: string;
-}): Promise<SessionResponse> {
+export async function startSession(
+  payload: SessionInput,
+): Promise<SessionResponse> {
   const response = await fetch(`${apiBase()}/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -75,15 +72,27 @@ export async function startSession(payload: {
   });
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error ?? "Failed to start agent session");
   }
 
   return response.json();
 }
 
-// The one function in this file that IS actually used — called server-side
-// from app/dashboard/[sessionId]/page.tsx.
-export async function getSession(id: string): Promise<SessionDetail> {
+export async function listSessions(): Promise<SessionRecord[]> {
+  const response = await fetch(`${apiBase()}/api/sessions`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
+
+  const json = await response.json();
+  return json.sessions;
+}
+
+// Called server-side from app/dashboard/[sessionId]/page.tsx.
+export async function getSession(id: string): Promise<SessionRecord> {
   const response = await fetch(`${apiBase()}/api/sessions/${id}`, {
     cache: "no-store",
   });
