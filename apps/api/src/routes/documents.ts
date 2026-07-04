@@ -5,6 +5,7 @@
 // finishes (chunksQueued reflects "queued", not "embedded").
 import { Hono } from "hono";
 import pdfParse from "pdf-parse";
+import { z } from "zod";
 import { db } from "../db/client";
 import { chunkText } from "../rag/chunk";
 import { EMBED_JOB_OPTIONS, embedQueue } from "../workers/queue";
@@ -27,6 +28,53 @@ async function extractTextFromFile(file: File): Promise<string> {
   throw new Error("Unsupported file type. Use PDF or TXT.");
 }
 
+// Shared by the initial upload and /reembed: chunks `content`, records the
+// resulting chunk count/status on the document row, and enqueues one embed
+// job per chunk. Zero chunks (empty content) is marked 'failed' immediately
+// rather than left in 'processing' with no embed job ever coming to
+// complete it.
+async function chunkAndEnqueueEmbeds(
+  docId: string,
+  filename: string,
+  content: string,
+): Promise<{ chunksQueued: number; status: "processing" | "failed" }> {
+  const chunks = chunkText(content, { size: 512, overlap: 64 });
+  const status = chunks.length === 0 ? "failed" : "processing";
+
+  await db.query(
+    `
+      UPDATE documents
+      SET status = $2, error_message = $3, chunks_total = $4
+      WHERE id = $1
+    `,
+    [
+      docId,
+      status,
+      chunks.length === 0 ? "document produced no chunks to embed" : null,
+      chunks.length,
+    ],
+  );
+
+  // One embed job per chunk, enqueued sequentially in a loop (not
+  // Promise.all) — this keeps enqueue order stable and avoids bursting
+  // Redis with many concurrent `add` calls for large documents.
+  for (const chunk of chunks) {
+    await embedQueue.add(
+      "embed",
+      {
+        docId,
+        filename,
+        chunk: chunk.content,
+        chunkIndex: chunk.index,
+        pageHint: chunk.pageHint,
+      },
+      EMBED_JOB_OPTIONS,
+    );
+  }
+
+  return { chunksQueued: chunks.length, status };
+}
+
 documentsRouter.post("/api/v1/documents", async (c) => {
   try {
     const body = await c.req.formData();
@@ -37,48 +85,26 @@ documentsRouter.post("/api/v1/documents", async (c) => {
     }
 
     const content = await extractTextFromFile(file);
-    const chunks = chunkText(content, { size: 512, overlap: 64 });
 
-    // A document with zero chunks (empty file, or content that chunkText
-    // can't split) can never receive an embed job and would otherwise sit
-    // in 'processing' forever — fail it immediately instead.
     const documentInsert = await db.query<{ id: string }>(
       `
-        INSERT INTO documents (filename, content, status, error_message, chunks_total)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO documents (filename, content)
+        VALUES ($1, $2)
         RETURNING id
       `,
-      [
-        file.name,
-        content,
-        chunks.length === 0 ? "failed" : "processing",
-        chunks.length === 0 ? "document produced no chunks to embed" : null,
-        chunks.length,
-      ],
+      [file.name, content],
     );
 
     const docId = documentInsert.rows[0].id;
-
-    // One embed job per chunk, enqueued sequentially in a loop (not
-    // Promise.all) — this keeps enqueue order stable and avoids bursting
-    // Redis with many concurrent `add` calls for large documents.
-    for (const chunk of chunks) {
-      await embedQueue.add(
-        "embed",
-        {
-          docId,
-          filename: file.name,
-          chunk: chunk.content,
-          chunkIndex: chunk.index,
-          pageHint: chunk.pageHint,
-        },
-        EMBED_JOB_OPTIONS,
-      );
-    }
+    const { chunksQueued } = await chunkAndEnqueueEmbeds(
+      docId,
+      file.name,
+      content,
+    );
 
     return c.json({
       documentId: docId,
-      chunksQueued: chunks.length,
+      chunksQueued,
       status: "queued",
     });
   } catch (error) {
@@ -111,4 +137,48 @@ documentsRouter.get("/api/v1/documents", async (c) => {
   );
 
   return c.json({ documents: result.rows });
+});
+
+const reembedParamsSchema = z.object({ id: z.string().uuid() });
+
+// Repairs a document that predates ingestion-status tracking, or one that
+// legitimately failed, without requiring the original file to be
+// re-uploaded — the document's stored `content` is already the full
+// extracted text. Idempotent: existing chunks are deleted first, so
+// calling this twice in a row (or on an already-'ready' document) just
+// re-derives the same chunks from the same content.
+documentsRouter.post("/api/v1/documents/:id/reembed", async (c) => {
+  let id: string;
+  try {
+    ({ id } = reembedParamsSchema.parse({ id: c.req.param("id") }));
+  } catch {
+    return c.json({ error: "Invalid document id" }, 400);
+  }
+
+  const docResult = await db.query<{ id: string; filename: string; content: string }>(
+    `SELECT id, filename, content FROM documents WHERE id = $1`,
+    [id],
+  );
+
+  if (docResult.rows.length === 0) {
+    return c.json({ error: "Document not found" }, 404);
+  }
+
+  const doc = docResult.rows[0];
+
+  try {
+    await db.query(`DELETE FROM document_chunks WHERE doc_id = $1`, [id]);
+    const { chunksQueued, status } = await chunkAndEnqueueEmbeds(
+      id,
+      doc.filename,
+      doc.content,
+    );
+
+    return c.json({ documentId: id, chunksQueued, status });
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : "Re-embed failed" },
+      500,
+    );
+  }
 });

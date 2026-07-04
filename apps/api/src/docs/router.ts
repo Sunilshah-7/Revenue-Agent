@@ -157,6 +157,64 @@ export function createDocsRouter(api: Hono) {
         },
       },
     })
+    .post("/api/v1/documents/:id/reembed", forward, {
+      detail: {
+        tags: ["Documents"],
+        summary: "Re-run chunking and embedding for an existing document",
+        description:
+          "Deletes the document's existing chunks and re-chunks/re-embeds " +
+          "its already-stored content from scratch (idempotent). Repairs a " +
+          "document stuck in 'failed' or ingested before status tracking " +
+          "existed, without needing to re-upload the original file.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Chunks cleared and re-embed jobs queued.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    documentId: { type: "string", format: "uuid" },
+                    chunksQueued: { type: "integer" },
+                    status: { type: "string", enum: ["processing", "failed"] },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "The id path parameter was not a valid UUID.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+          "404": {
+            description: "No document with that id.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
     .get("/api/v1/sessions", forward, {
       detail: {
         tags: ["Sessions"],
