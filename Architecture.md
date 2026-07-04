@@ -174,8 +174,9 @@ Hono /api/v1/documents
         │
         ├── Parse file content
         ├── Split into chunks (512 tokens, 64 overlap)
+        ├── INSERT INTO documents (status='processing', chunks_total=N)
         ├── Enqueue embed jobs → BullMQ "embed" queue
-        └── Return { jobId, status: "queued" }
+        └── Return { documentId, chunksQueued, status: "queued" }
 
 BullMQ embed.worker
         │
@@ -183,7 +184,24 @@ BullMQ embed.worker
         ├── Receive float[] vector (768 dims)
         └── INSERT INTO document_chunks (content, embedding, metadata)
             using pgvector
+
+embedQueueEvents (index.ts)
+        │
+        ├── "completed" → documents.status='ready' once every chunk in
+        │   chunks_total has an embedded row (order-independent: checked
+        │   as a count comparison, not "last job wins")
+        └── "failed"    → documents.status='failed', error_message=reason,
+            once a chunk's embed job exhausts its retries
 ```
+
+A document that produces zero chunks (empty file) is marked `failed`
+immediately in the same request, since it will never receive an embed job
+to complete it. `POST /api/v1/documents/:id/reembed` repairs a `failed`
+document (or one ingested before `status` existed) by deleting its chunks
+and re-running chunking/embedding against its already-stored `content` —
+no re-upload needed. See [Document Ingestion Status](README.md#document-ingestion-status)
+in the README for the full status lifecycle and the endpoint's request/response
+shape.
 
 ### 2. Agent Session (Research → Write)
 
@@ -202,9 +220,14 @@ OrchestratorAgent.start()
 
 BullMQ research.worker
         │
-        ├── RAG retrieval: embed(prospectContext) → pgvector similarity search
+        ├── RAG retrieval: embed(prospectContext) → pgvector similarity search,
+        │   filtered by MIN_SIMILARITY_THRESHOLD and optional playbookId
         ├── Fetch top-k chunks from document_chunks
-        ├── Call Groq (llama-3.3-70b) with retrieved context
+        ├── Assemble context: dedupe + cap to a word budget (rag/context.ts)
+        ├── UPDATE sessions SET retrieval_trace = {...} — see
+        │   [Retrieval Trace](README.md#retrieval-trace) in the README
+        ├── Call Groq (llama-3.3-70b) with retrieved context (or an explicit
+        │   "no playbook context found" note if nothing cleared the threshold)
         ├── Emit streaming tokens → Redis pub/sub → Elysia WS → client
         └── On complete → enqueue "writer" job
 
@@ -369,10 +392,13 @@ Completed jobs: retained for 1 hour (TTL), then removed.
 ```sql
 -- Uploaded sales playbook documents
 CREATE TABLE documents (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  filename    TEXT NOT NULL,
-  content     TEXT NOT NULL,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  filename      TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'processing', -- processing | ready | failed
+  error_message TEXT,
+  chunks_total  INTEGER NOT NULL DEFAULT 0, -- expected chunk count, recorded at upload/reembed time
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Chunked + embedded pieces of each document
@@ -396,10 +422,19 @@ CREATE TABLE sessions (
   input           JSONB NOT NULL,
   output          TEXT,
   error_message   TEXT,
+  retrieval_trace JSONB, -- see Retrieval Trace in README; null until research's retrieval step runs
   created_at      TIMESTAMPTZ DEFAULT NOW(),
   updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ```
+
+`documents.status`/`error_message`/`chunks_total` and
+`sessions.retrieval_trace` were added in
+`apps/api/src/db/migrations/002_document_status_and_retrieval_trace.sql`,
+after diagnosing an incident where a document could exist in the table
+while being partially or fully unsearchable with no visible sign of it
+(see [Document Ingestion Status](README.md#document-ingestion-status) in
+the README).
 
 ---
 
@@ -476,3 +511,5 @@ NEXT_PUBLIC_WS_URL=      # Railway WebSocket URL
 **pgvector over a dedicated vector DB** — Keeping vectors in the same Postgres instance as the rest of the data eliminates a dependency and a network hop. At playbook scale (hundreds to low thousands of chunks), HNSW indexing in pgvector performs well without a dedicated vector store.
 
 **Redis pub/sub for WS token streaming** — Workers don't hold WebSocket references directly (they're in a separate async context from the WS handlers). Redis pub/sub is the clean decoupling layer: workers publish tokens to a session-keyed channel, and the Elysia WS handler subscribes and forwards to the client.
+
+**Embedding quality is a known limitation** — `rag/embed.ts`'s local deterministic hashing embedder is a lexical-overlap (bag-of-words/bigram hash-bucket) scheme, not a learned semantic embedding. Its cosine similarity scores don't reliably separate genuinely relevant playbook content from superficially-overlapping or even unrelated text; `MIN_SIMILARITY_THRESHOLD` in `rag/retrieve.ts` only screens out the worst noise floor, not a precision filter. `retrieval_trace` (persisted per session, surfaced via `GET /api/v1/sessions/:id` and the session detail page's "Retrieval trace" panel) is this system's actual diagnostic tool for judging match quality — read it before assuming a low-scoring or absent chunk means retrieval is broken, and before assuming a chunk scoring above threshold is truly semantically relevant. Swapping in a real embedding model (e.g. via a hosted embeddings API) would be the fix; it's out of scope for the ingestion/retrieval observability work this note accompanies.

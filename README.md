@@ -251,13 +251,14 @@ For an interactive, browsable version of everything below (with "try it out" aga
 
 | Method | Path                   | Description                           |
 | ------ | ---------------------- | ------------------------------------- |
-| `GET`  | `/health`              | Health check                          |
-| `POST` | `/api/v1/documents`    | Upload and ingest a playbook document |
-| `GET`  | `/api/v1/documents`    | List all ingested documents           |
-| `GET`  | `/api/v1/sessions`     | List recent agent sessions            |
-| `POST` | `/api/v1/sessions`     | Start a new agent session             |
-| `GET`  | `/api/v1/sessions/:id` | Get session status and output         |
-| `POST` | `/api/v1/query`        | One-shot RAG query against playbooks  |
+| `GET`  | `/health`                       | Health check                                   |
+| `POST` | `/api/v1/documents`             | Upload and ingest a playbook document          |
+| `GET`  | `/api/v1/documents`             | List all ingested documents, with status       |
+| `POST` | `/api/v1/documents/:id/reembed` | Re-chunk/re-embed an existing document         |
+| `GET`  | `/api/v1/sessions`              | List recent agent sessions                     |
+| `POST` | `/api/v1/sessions`              | Start a new agent session                      |
+| `GET`  | `/api/v1/sessions/:id`          | Get session status, output, and retrieval trace |
+| `POST` | `/api/v1/query`                 | One-shot RAG query against playbooks           |
 
 **`POST /api/v1/sessions` request body** — `playbookId` is optional (omit it to search across all indexed playbooks):
 
@@ -268,6 +269,61 @@ For an interactive, browsable version of everything below (with "try it out" aga
 ```json
 { "sessionId": "1dd1d470-b0ee-4f0f-a48f-f780c0faf25c", "status": "researching" }
 ```
+
+### Document Ingestion Status
+
+Every document has a `status`: `processing` (embed jobs still running),
+`ready` (every expected chunk is chunked and embedded), or `failed` (a
+chunk's embed job exhausted its retries, or the document produced zero
+chunks). `GET /api/v1/documents` returns `status`, `error_message`, and
+`chunk_count` (the actually-embedded count, which can differ from
+`chunks_total` while a document is still `processing`) per document — so a
+document that "exists" but is unsearchable is visibly distinguishable from
+one that's fully indexed, instead of looking identical to both a human and
+to retrieval.
+
+To repair a `failed` document (or one ingested before this column
+existed) without re-uploading the original file:
+
+```bash
+curl -X POST http://localhost:3001/api/v1/documents/<id>/reembed
+# { "documentId": "<id>", "chunksQueued": 3, "status": "processing" }
+```
+
+This deletes the document's existing chunks and re-chunks/re-embeds its
+already-stored `content` from scratch — safe to call more than once.
+
+### Retrieval Trace
+
+`GET /api/v1/sessions/:id` includes `retrieval_trace`, populated once the
+research stage's retrieval step has run for that session (`null` before
+then):
+
+```json
+{
+  "query": "...",
+  "topK": 5,
+  "threshold": 0.1,
+  "playbookId": null,
+  "totalCandidates": 3,
+  "truncated": false,
+  "chunks": [
+    { "doc_id": "...", "filename": "test-playbook.txt", "chunk_index": 0, "score": 0.329, "preview": "Revenue Playbook: Mid-Market SaaS Expansion..." }
+  ]
+}
+```
+
+`threshold` is `MIN_SIMILARITY_THRESHOLD` from `apps/api/src/rag/retrieve.ts`
+— chunks scoring below it are dropped before they ever reach the LLM
+prompt. **Embeddings are a known limitation**, not retrieval logic: per the
+Tech Stack table, `rag/embed.ts` is a local deterministic lexical hashing
+scheme (shared word/bigram hash-bucket overlap), not a learned semantic
+embedding, so its cosine scores don't cleanly separate "relevant" from
+"irrelevant" — an unrelated query can still score ~0.1-0.14 purely from
+hash collisions. `retrieval_trace` (and the Session detail page's
+"Retrieval trace" panel) is the intended diagnostic tool for judging match
+quality in this system, not a guarantee that a high score means real
+semantic relevance.
 
 ### WebSocket (Elysia — same port via upgrade)
 
