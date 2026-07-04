@@ -104,10 +104,13 @@ cd ../api && bun install
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE documents (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  filename   TEXT NOT NULL,
-  content    TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  filename      TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'processing', -- processing | ready | failed
+  error_message TEXT,
+  chunks_total  INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE document_chunks (
@@ -123,17 +126,25 @@ CREATE INDEX ON document_chunks
   USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE sessions (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  status        TEXT NOT NULL DEFAULT 'idle',
-  input         JSONB NOT NULL,
-  output        TEXT,
-  error_message TEXT,
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ DEFAULT NOW()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status          TEXT NOT NULL DEFAULT 'idle',
+  input           JSONB NOT NULL,
+  output          TEXT,
+  error_message   TEXT,
+  retrieval_trace JSONB,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
 3. Copy the **pooled connection string** from your Neon dashboard.
+
+> **Existing hosted database?** These columns were added in
+> `apps/api/src/db/migrations/002_document_status_and_retrieval_trace.sql`.
+> Run that file's statements (it's idempotent — `ADD COLUMN IF NOT EXISTS`)
+> against your Neon database to pick them up without recreating tables. See
+> [Document Ingestion Status](#document-ingestion-status) and
+> [Retrieval Trace](#retrieval-trace) below for what they're for.
 
 ### 3. Set up Upstash (Redis)
 

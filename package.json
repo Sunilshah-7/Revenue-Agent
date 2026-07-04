@@ -13,7 +13,7 @@
     "dev:api": "bun --cwd=apps/api run dev",
     "dev": "concurrently -n api,web -c blue,green \"bun run dev:api\" \"bun run dev:web\"",
     "infra:local": "docker compose -f compose.local.yml up -d --wait",
-    "db:migrate:local": "docker compose -f compose.local.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U arap -d arap -f /migrations/001_initial.sql",
+    "db:migrate:local": "docker compose -f compose.local.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U arap -d arap -f /migrations/001_initial.sql -f /migrations/002_document_status_and_retrieval_trace.sql",
     "dev:api:local": "bun --cwd=apps/api --env-file=.env.local run src/index.ts",
     "dev:web:local": "bun --cwd=apps/web --env-file=.env.local run dev",
     "dev:local": "bun run infra:local && bun run db:migrate:local && concurrently -n api,web -c blue,green \"bun run dev:api:local\" \"bun run dev:web:local\"",
