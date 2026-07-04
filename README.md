@@ -293,6 +293,18 @@ curl -X POST http://localhost:3001/api/v1/documents/<id>/reembed
 This deletes the document's existing chunks and re-chunks/re-embeds its
 already-stored `content` from scratch — safe to call more than once.
 
+**A crash mid-ingestion is self-healing, within a bound.** Since embed jobs
+run as BullMQ jobs, killing the process while one is in flight leaves the
+document in `processing`, but BullMQ's stalled-job detection reassigns
+that job once any worker resumes polling the `embed` queue (verified
+locally: recovery happened within its default ~30s `stalledInterval`
+after restart) — the document then completes normally, or is marked
+`failed` if it keeps stalling past `maxStalledCount`. The one case this
+doesn't cover is a worker that never restarts at all (a permanently dead
+deployment), which would leave a document in `processing` indefinitely
+with no automatic recovery; a periodic sweep marking long-`processing`
+documents `failed` would close that gap, but isn't implemented here.
+
 ### Retrieval Trace
 
 `GET /api/v1/sessions/:id` includes `retrieval_trace`, populated once the
