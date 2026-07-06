@@ -315,7 +315,7 @@ then):
 {
   "query": "...",
   "topK": 5,
-  "threshold": 0.1,
+  "threshold": 0.4,
   "playbookId": null,
   "totalCandidates": 3,
   "truncated": false,
@@ -331,11 +331,15 @@ prompt. **Embeddings are a known limitation**, not retrieval logic: per the
 Tech Stack table, `rag/embed.ts` is a local deterministic lexical hashing
 scheme (shared word/bigram hash-bucket overlap), not a learned semantic
 embedding, so its cosine scores don't cleanly separate "relevant" from
-"irrelevant" — an unrelated query can still score ~0.1-0.14 purely from
-hash collisions. `retrieval_trace` (and the Session detail page's
-"Retrieval trace" panel) is the intended diagnostic tool for judging match
-quality in this system, not a guarantee that a high score means real
-semantic relevance.
+"irrelevant" — two full-length playbooks on similar topics (e.g. both
+being enablement docs with pricing tiers and a case study) can score up to
+~0.37 cosine similarity against an unrelated prospect purely from shared
+sales-document vocabulary, well above the old 0.1 threshold. See
+[Architecture.md](./Architecture.md#key-design-decisions) for the measured
+distribution behind the current 0.4 threshold. `retrieval_trace` (and the
+Session detail page's "Retrieval trace" panel) is the intended diagnostic
+tool for judging match quality in this system, not a guarantee that a high
+score means real semantic relevance.
 
 ### WebSocket (Elysia — same port via upgrade)
 

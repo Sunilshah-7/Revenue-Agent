@@ -12,16 +12,19 @@ export interface RetrievedChunk {
   metadata: Record<string, unknown>;
 }
 
-// Coarse noise guard, not a precision filter: rag/embed.ts is a lexical
-// hashing embedder (shared word/bigram hash-bucket overlap), not a learned
-// semantic embedding, so its cosine scores don't cleanly separate
-// "relevant" from "irrelevant" — an unrelated query can still score ~0.1-0.14
-// purely from hash collisions (measured locally), while a weakly-related
-// but genuinely on-topic chunk can score ~0.18. This threshold only screens
-// out the near-zero/negative noise floor; retrieval_trace (see
-// research.worker.ts) is the actual diagnostic tool for judging match
-// quality, per Architecture.md's embedding-quality limitation note.
-export const MIN_SIMILARITY_THRESHOLD = 0.1;
+// Recalibrated against a real measured score distribution across two
+// full-length sample playbooks (SaaS and healthcare) and three prospect
+// contexts — see Architecture.md's embedding-quality limitation note for
+// the full numbers. The old 0.1 threshold only screened a flat noise floor
+// and was measured against short, low-overlap fixture text; once real
+// long-form playbooks are in the corpus, two on-topic-sounding but
+// wrong-domain documents (both being "playbook"-shaped, with "pricing
+// tiers" and "case studies") produce lexical hash overlap up to 0.371,
+// while genuine same-playbook matches never scored below 0.4222 across
+// every fixture tested. 0.40 sits in that gap. This is still a coarse
+// guard, not a precision filter — retrieval_trace (see research.worker.ts)
+// remains the actual diagnostic tool for judging match quality.
+export const MIN_SIMILARITY_THRESHOLD = 0.4;
 
 export async function retrieveTopChunks(
   query: string,
