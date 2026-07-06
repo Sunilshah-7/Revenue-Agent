@@ -6,7 +6,8 @@
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun --env-file=.env.local test"
+    "test": "bun --env-file=.env.local test",
+    "live-eval": "bun --env-file=.env.local run scripts/live-eval.ts"
   },
   "dependencies": {
     "@elysiajs/openapi": "^1.4.15",
