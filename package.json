@@ -18,7 +18,8 @@
     "dev:web:local": "bun --cwd=apps/web --env-file=.env.local run dev",
     "dev:local": "bun run infra:local && bun run db:migrate:local && concurrently -n api,web -c blue,green \"bun run dev:api:local\" \"bun run dev:web:local\"",
     "infra:local:down": "docker compose -f compose.local.yml down",
-    "typecheck": "bun --cwd=apps/api run typecheck && bun --cwd=apps/web run typecheck"
+    "typecheck": "bun --cwd=apps/api run typecheck && bun --cwd=apps/web run typecheck",
+    "test": "bun --cwd=apps/api run test"
   },
   "devDependencies": {
     "concurrently": "^10.0.3"

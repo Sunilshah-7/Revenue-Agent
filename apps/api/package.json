@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun --env-file=.env.local test"
   },
   "dependencies": {
     "@elysiajs/openapi": "^1.4.15",
