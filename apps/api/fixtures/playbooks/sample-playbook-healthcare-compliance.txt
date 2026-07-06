@@ -1,0 +1,25 @@
+MedGraph Compliance Enablement Playbook — Multi-Facility Healthcare Networks
+
+MedGraph is an accreditation-readiness and compliance-documentation platform built for multi-facility healthcare networks. It continuously maps a network's policies, staff training records, and incident logs against accreditation survey standards, so a compliance team can see its actual exposure before a surveyor does, instead of discovering gaps during a live survey.
+
+PRICING TIERS
+
+Network tier: $1,900 per facility per month, billed to the network's central compliance budget rather than per-facility budgets. For a 12-facility network, this prices out to $22,800 per month network-wide. Network tier includes continuous cross-facility gap mapping against Joint Commission standards, a centralized deficiency dashboard visible to the Chief Compliance Officer, and audit-prep workspace generation for every accredited facility.
+
+Single-facility pilot: a 45-day pilot scoped to one facility, priced separately from the Network tier and intended to de-risk a network-wide commitment before it's made. The pilot covers gap mapping and audit-prep workspace generation for the pilot facility only, and is designed to produce a concrete before/after readiness comparison a Chief Compliance Officer can bring to their own leadership before committing the full network.
+
+EHR MIGRATION RISK
+
+A network mid-migration between electronic health record systems (for example, moving from Cerner to Epic) is a specific, elevated compliance-risk trigger MedGraph is built to address: policy documentation, staff training records, and incident logs frequently live in different systems of record during a migration window, which is exactly when accreditation survey readiness silently degrades — nothing about the migration itself is non-compliant, but the fragmentation makes gaps much harder for a compliance team to see using spreadsheets or manual audits. Lead with this angle specifically when a prospect mentions an in-progress or upcoming EHR migration alongside an approaching survey window.
+
+AUDIT-PREP COST FRAMING
+
+Networks preparing for an accreditation survey without MedGraph typically rely on internal staff-weeks plus an external consultant engagement to manually assemble audit-prep documentation — commonly in the range of tens of staff-weeks of internal compliance-team time plus a consultant audit-prep engagement costing on the order of $150,000-$200,000, depending on network size. MedGraph's continuous gap-mapping is positioned to substantially displace that manual, survey-triggered scramble, since the readiness picture already exists before the survey date is announced rather than being assembled from scratch against a deadline.
+
+CASE STUDY — CASCADIA REGIONAL HEALTH
+
+Cascadia Regional Health, a multi-facility network preparing for a Joint Commission survey, adopted MedGraph's Network tier roughly five months before its survey date. Prior to MedGraph, Cascadia's internal audit-prep process took an average of 11 weeks per facility to assemble survey-ready documentation manually. After adopting MedGraph, that same audit-prep process took 9 days per facility. Cascadia's identified deficiency count (gaps found during internal readiness review, before the actual survey) dropped 63% compared to their prior survey cycle. Cascadia's compliance team calculated that the combination of avoided consultant audit-prep fees and avoided staff-week cost across the network totaled approximately $840,000 in avoided spend for that survey cycle. Cascadia's Chief Compliance Officer cited the centralized deficiency dashboard — giving one cross-facility view instead of per-facility spreadsheets — as the specific capability that shortened their prep timeline the most.
+
+QUALIFYING A COMPLIANCE PROSPECT
+
+A strong MedGraph prospect is a multi-facility network (not a single independent site) with a named upcoming accreditation survey date, a Chief Compliance Officer or equivalent buyer with budget authority over a centralized compliance line item, and ideally a concrete complicating factor such as an in-progress EHR migration or documented reliance on a costly external consultant engagement for prior surveys. The single-facility 45-day pilot is the right entry point when the network wants to de-risk the Network-tier commitment with one facility's real before/after readiness numbers first, rather than committing network-wide immediately.
