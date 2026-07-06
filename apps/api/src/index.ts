@@ -7,6 +7,7 @@ import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { markSessionError, registerResearchToWriterHandoff } from "./agents/orchestrator";
 import { db } from "./db/client";
 import { env } from "./lib/env";
 import { logger } from "./lib/logger";
@@ -18,17 +19,9 @@ import { createDocsRouter } from "./docs/router";
 import { startEmbedWorker } from "./workers/embed.worker";
 import { startResearchWorker } from "./workers/research.worker";
 import { startWriterWorker } from "./workers/writer.worker";
-import {
-  embedQueue,
-  embedQueueEvents,
-  researchQueue,
-  researchQueueEvents,
-  writerQueue,
-} from "./workers/queue";
+import { embedQueue, embedQueueEvents } from "./workers/queue";
 import {
   initializeSessionEventBridge,
-  publishSessionEvent,
-  publishSessionStatus,
   registerSessionSocket,
   unregisterSessionSocket,
 } from "./ws/session";
@@ -63,120 +56,10 @@ const embedWorker = startEmbedWorker();
 const researchWorker = startResearchWorker();
 const writerWorker = startWriterWorker();
 
-// Shared by every failure path below (research job failure, writer job
-// failure, and an exception inside the research "completed" handler
-// itself) so a session is never left stuck in "researching"/"writing" —
-// two rows previously got stuck that way because the "completed" handler
-// below had no try/catch: its own DB update or writerQueue.add() could
-// throw after the research job had already succeeded, so BullMQ's "failed"
-// event never fired for it and nothing else marked the session as errored.
-async function markSessionError(
-  sessionId: string,
-  message: string,
-): Promise<void> {
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'error', error_message = $2, updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId, message],
-  );
-
-  await publishSessionEvent(sessionId, { type: "error", message });
-}
-
-// This listener is the hinge of the orchestration pipeline: it is what
-// advances a session from "researching" to "writing" once the research
-// worker's job resolves, by reading the research summary out of the job's
-// return value and enqueueing the writer job with it. There is no direct
-// call from the research worker into the writer queue — this decoupling
-// through QueueEvents is what lets research and writing be retried,
-// observed, and scaled independently (see Active Decisions Log).
-researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
-  if (!jobId) {
-    return;
-  }
-
-  const job = await researchQueue.getJob(jobId);
-  if (!job) {
-    return;
-  }
-
-  const sessionId = job.data.sessionId as string;
-  const prospectContext = job.data.input.prospectContext;
-
-  // researchQueueEvents JSON.parses the job's return value before emitting
-  // "completed" (see bullmq's queue-events.js), so this is the actual
-  // ResearchStageResult object, not a re-stringified summary.
-  const researchResult = returnvalue as
-    | { summary?: string; retrievedContext?: string; hasContext?: boolean }
-    | undefined;
-
-  try {
-    await db.query(
-      `
-        UPDATE sessions
-        SET status = 'writing', updated_at = NOW()
-        WHERE id = $1
-      `,
-      [sessionId],
-    );
-
-    await publishSessionStatus(sessionId, "writing");
-
-    // Retries/backoff/removeOnFail are set per-enqueue rather than as a
-    // queue default so the writer stage's retry policy can diverge from
-    // research's if needed; removeOnFail: false keeps failed writer jobs
-    // around for inspection instead of silently discarding them.
-    await writerQueue.add(
-      "write",
-      {
-        sessionId,
-        prospectContext,
-        researchSummary: String(researchResult?.summary ?? ""),
-        // Raw retrieved playbook chunks (not the paraphrased summary) plus
-        // whether retrieval found anything — the writer's qualification and
-        // grounding steps need the actual passages, not a paraphrase that
-        // may have softened or dropped a detail.
-        retrievedContext: String(researchResult?.retrievedContext ?? ""),
-        hasContext: Boolean(researchResult?.hasContext),
-      },
-      {
-        attempts: 3,
-        backoff: { type: "exponential", delay: 500 },
-        removeOnComplete: { age: 3600 },
-        removeOnFail: false,
-      },
-    );
-  } catch (error) {
-    logger.error("Failed to hand research result off to writer queue", {
-      sessionId,
-      error,
-    });
-    await markSessionError(
-      sessionId,
-      error instanceof Error ? error.message : "Failed to enqueue writer job",
-    );
-  }
-});
-
-// If research itself fails (after its own retries are exhausted), the
-// session is terminally marked "error" and the writer stage never runs —
-// there is no partial/fallback business case.
-researchQueueEvents.on("failed", async ({ jobId, failedReason }) => {
-  if (!jobId) {
-    return;
-  }
-
-  const job = await researchQueue.getJob(jobId);
-  const sessionId = job?.data.sessionId;
-  if (!sessionId) {
-    return;
-  }
-
-  await markSessionError(sessionId, failedReason ?? "Research failed");
-});
+// Registers the research -> write hand-off (see agents/orchestrator.ts) —
+// extracted there so a test harness or the live-eval script can wire up
+// the same real orchestration logic without duplicating it.
+registerResearchToWriterHandoff();
 
 // Mirror of the research-failure handler, but bound directly to the writer
 // Worker's "failed" event instead of QueueEvents — both approaches exist
