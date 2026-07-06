@@ -14,9 +14,9 @@
     "dev": "concurrently -n api,web -c blue,green \"bun run dev:api\" \"bun run dev:web\"",
     "infra:local": "docker compose -f compose.local.yml up -d --wait",
     "db:migrate:local": "docker compose -f compose.local.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U arap -d arap -f /migrations/001_initial.sql -f /migrations/002_document_status_and_retrieval_trace.sql",
-    "dev:api:local": "bun --cwd=apps/api --env-file=.env.local run src/index.ts",
+    "dev:api:local": "(kill -9 $(lsof -t -i:${PORT:-3001}) 2>/dev/null || true) && bun --cwd=apps/api --env-file=.env.local run src/index.ts",
     "dev:web:local": "bun --cwd=apps/web --env-file=.env.local run dev",
-    "dev:local": "bun run infra:local && bun run db:migrate:local && concurrently -n api,web -c blue,green \"bun run dev:api:local\" \"bun run dev:web:local\"",
+    "dev:local": "bun run infra:local && bun run db:migrate:local && (kill -9 $(lsof -t -i:${PORT:-3001}) 2>/dev/null || true) && concurrently -n api,web -c blue,green \"bun run dev:api:local\" \"bun run dev:web:local\"",
     "infra:local:down": "docker compose -f compose.local.yml down",
     "typecheck": "bun --cwd=apps/api run typecheck && bun --cwd=apps/web run typecheck",
     "test": "bun --cwd=apps/api run test"

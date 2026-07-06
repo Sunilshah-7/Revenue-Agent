@@ -33,13 +33,19 @@ export class OrchestratorAgent {
     // still see the status transition.
     await publishSessionStatus(sessionId, "researching");
 
-    // Same retry/backoff shape as the writer job enqueue in index.ts —
+    // Same retry/backoff shape as the writer job enqueue below —
     // exponential backoff over 3 attempts, and failed jobs are kept
     // (removeOnFail: false) for later inspection rather than discarded.
+    // jobId is deterministic (one research job per session) so a duplicate
+    // enqueue call for the same sessionId (e.g. from a stale second process
+    // also handling this request) is dropped by BullMQ instead of running
+    // twice. removeOnComplete evicts the completed job record so re-running
+    // the same sessionId later isn't blocked by the old jobId still existing.
     await researchQueue.add(
       "research",
       { sessionId, input },
       {
+        jobId: `research-${sessionId}`,
         attempts: 3,
         backoff: { type: "exponential", delay: 500 },
         removeOnComplete: { age: 3600 },
@@ -108,21 +114,25 @@ export function registerResearchToWriterHandoff(): void {
       | undefined;
 
     try {
-      await db.query(
-        `
-          UPDATE sessions
-          SET status = 'writing', updated_at = NOW()
-          WHERE id = $1
-        `,
-        [sessionId],
-      );
-
+      // Only the WS event is published here, immediately, so a connected
+      // browser sees the transition without waiting on queue latency. The
+      // DB row's status is left for the writer worker itself to claim
+      // atomically right before it starts (see writer.worker.ts) — that
+      // claim is also the writer-duplicate guard, and it only works if the
+      // row isn't already sitting in 'writing' before either job starts.
       await publishSessionStatus(sessionId, "writing");
 
       // Retries/backoff/removeOnFail are set per-enqueue rather than as a
       // queue default so the writer stage's retry policy can diverge from
       // research's if needed; removeOnFail: false keeps failed writer jobs
-      // around for inspection instead of silently discarding them.
+      // around for inspection instead of silently discarding them. jobId is
+      // deterministic (one writer job per session) so this handler firing
+      // more than once for the same sessionId — e.g. a stale second backend
+      // process also subscribed to researchQueueEvents — enqueues the same
+      // BullMQ job id twice and the duplicate is dropped rather than
+      // starting a second writer run that interleaves tokens with the
+      // first. removeOnComplete evicts the completed record so a legitimate
+      // re-run of the same sessionId later isn't blocked by the old jobId.
       await writerQueue.add(
         "write",
         {
@@ -137,6 +147,7 @@ export function registerResearchToWriterHandoff(): void {
           hasContext: Boolean(researchResult?.hasContext),
         },
         {
+          jobId: `writer-${sessionId}`,
           attempts: 3,
           backoff: { type: "exponential", delay: 500 },
           removeOnComplete: { age: 3600 },

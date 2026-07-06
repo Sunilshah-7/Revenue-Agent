@@ -7,6 +7,7 @@
 import { Worker } from "bullmq";
 import { db } from "../db/client";
 import { streamCompletion } from "../lib/groq";
+import { logger } from "../lib/logger";
 import { redisConnection } from "../redis/client";
 import { publishSessionEvent, publishSessionStatus } from "../ws/session";
 
@@ -84,6 +85,32 @@ export function startWriterWorker(): Worker<WriterJobData> {
     async (job) => {
       const { sessionId, prospectContext, researchSummary, retrievedContext, hasContext } =
         job.data;
+
+      // Cheap protection if a duplicate writer job slips through the jobId
+      // dedup in orchestrator.ts (e.g. Redis state predates that dedup, or a
+      // manual/test enqueue bypasses the orchestrator): atomically claim the
+      // session by flipping it to 'writing' only if it isn't already
+      // 'writing' or 'complete'. Postgres row-level locking makes this
+      // race-safe between two concurrent workers — only one UPDATE can win
+      // the WHERE condition, so at most one job ever proceeds to stream
+      // tokens for a given session. A plain SELECT-then-check would leave a
+      // race window between the read and the write.
+      const claim = await db.query(
+        `
+          UPDATE sessions
+          SET status = 'writing', updated_at = NOW()
+          WHERE id = $1 AND status NOT IN ('writing', 'complete')
+        `,
+        [sessionId],
+      );
+      if (claim.rowCount === 0) {
+        logger.warn(
+          "Skipping duplicate writer job; session already writing/complete",
+          { sessionId },
+        );
+        return;
+      }
+
       await publishSessionStatus(sessionId, "writing");
 
       // Deliberately neutral: states the fact (no context met threshold)
