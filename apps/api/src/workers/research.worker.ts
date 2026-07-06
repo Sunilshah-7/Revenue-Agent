@@ -30,6 +30,20 @@ interface ResearchJobData {
 
 const RESEARCH_TOP_K = 5;
 
+// What the research stage hands off to the writer stage. `retrievedContext`
+// is the raw numbered chunk text (see rag/context.ts's assembleContext),
+// not the LLM-generated `summary` — the writer's qualification/grounding
+// step needs the actual playbook passages, since a paraphrased summary can
+// drop or soften details a disqualification/business-case decision must be
+// evidence-exact about. `hasContext` is `usedChunks.length > 0` from this
+// same retrieval, surfaced explicitly so the writer doesn't have to infer
+// "no context" from prose.
+export interface ResearchStageResult {
+  summary: string;
+  retrievedContext: string;
+  hasContext: boolean;
+}
+
 function chunkFilename(chunk: RetrievedChunk): string {
   const filename = chunk.metadata?.filename;
   return typeof filename === "string" ? filename : "unknown";
@@ -92,8 +106,8 @@ async function persistRetrievalTrace(
   });
 }
 
-export function startResearchWorker(): Worker<ResearchJobData, string> {
-  return new Worker<ResearchJobData, string>(
+export function startResearchWorker(): Worker<ResearchJobData, ResearchStageResult> {
+  return new Worker<ResearchJobData, ResearchStageResult>(
     "research",
     async (job) => {
       const { sessionId, input } = job.data;
@@ -145,7 +159,11 @@ export function startResearchWorker(): Worker<ResearchJobData, string> {
       // before the writer stage's tokens start arriving on the same
       // session channel.
       await publishSessionEvent(sessionId, { type: "token", data: "\n\n" });
-      return summary;
+      return {
+        summary,
+        retrievedContext: context,
+        hasContext: usedChunks.length > 0,
+      };
     },
     {
       connection: redisConnection,

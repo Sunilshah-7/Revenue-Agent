@@ -106,6 +106,13 @@ researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
   const sessionId = job.data.sessionId as string;
   const prospectContext = job.data.input.prospectContext;
 
+  // researchQueueEvents JSON.parses the job's return value before emitting
+  // "completed" (see bullmq's queue-events.js), so this is the actual
+  // ResearchStageResult object, not a re-stringified summary.
+  const researchResult = returnvalue as
+    | { summary?: string; retrievedContext?: string; hasContext?: boolean }
+    | undefined;
+
   try {
     await db.query(
       `
@@ -127,7 +134,13 @@ researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
       {
         sessionId,
         prospectContext,
-        researchSummary: String(returnvalue ?? ""),
+        researchSummary: String(researchResult?.summary ?? ""),
+        // Raw retrieved playbook chunks (not the paraphrased summary) plus
+        // whether retrieval found anything — the writer's qualification and
+        // grounding steps need the actual passages, not a paraphrase that
+        // may have softened or dropped a detail.
+        retrievedContext: String(researchResult?.retrievedContext ?? ""),
+        hasContext: Boolean(researchResult?.hasContext),
       },
       {
         attempts: 3,
