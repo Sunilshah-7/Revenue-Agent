@@ -147,6 +147,29 @@ const reembedParamsSchema = z.object({ id: z.string().uuid() });
 // extracted text. Idempotent: existing chunks are deleted first, so
 // calling this twice in a row (or on an already-'ready' document) just
 // re-derives the same chunks from the same content.
+const deleteParamsSchema = z.object({ id: z.string().uuid() });
+
+// Removes a document and its chunks entirely (document_chunks.doc_id has
+// ON DELETE CASCADE, so one statement clears both) — the roadmap "document
+// management: delete" item, and the only way to remove a document ingested
+// by mistake or during test/debugging without a DB shell.
+documentsRouter.delete("/api/v1/documents/:id", async (c) => {
+  let id: string;
+  try {
+    ({ id } = deleteParamsSchema.parse({ id: c.req.param("id") }));
+  } catch {
+    return c.json({ error: "Invalid document id" }, 400);
+  }
+
+  const result = await db.query(`DELETE FROM documents WHERE id = $1`, [id]);
+
+  if (result.rowCount === 0) {
+    return c.json({ error: "Document not found" }, 404);
+  }
+
+  return c.json({ documentId: id, deleted: true });
+});
+
 documentsRouter.post("/api/v1/documents/:id/reembed", async (c) => {
   let id: string;
   try {
