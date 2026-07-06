@@ -255,6 +255,7 @@ For an interactive, browsable version of everything below (with "try it out" aga
 | `POST` | `/api/v1/documents`             | Upload and ingest a playbook document          |
 | `GET`  | `/api/v1/documents`             | List all ingested documents, with status       |
 | `POST` | `/api/v1/documents/:id/reembed` | Re-chunk/re-embed an existing document         |
+| `DELETE` | `/api/v1/documents/:id`       | Delete a document and its chunks (cascades); 404 if not found |
 | `GET`  | `/api/v1/sessions`              | List recent agent sessions                     |
 | `POST` | `/api/v1/sessions`              | Start a new agent session                      |
 | `GET`  | `/api/v1/sessions/:id`          | Get session status, output, and retrieval trace |
@@ -320,7 +321,7 @@ then):
   "totalCandidates": 3,
   "truncated": false,
   "chunks": [
-    { "doc_id": "...", "filename": "test-playbook.txt", "chunk_index": 0, "score": 0.329, "preview": "Revenue Playbook: Mid-Market SaaS Expansion..." }
+    { "doc_id": "...", "filename": "sample-playbook-enterprise-saas.txt", "chunk_index": 0, "score": 0.4225, "preview": "RevPilot Sales Enablement Playbook — Enterprise B2B SaaS..." }
   ]
 }
 ```
@@ -341,6 +342,43 @@ Session detail page's "Retrieval trace" panel) is the intended diagnostic
 tool for judging match quality in this system, not a guarantee that a high
 score means real semantic relevance.
 
+### Writer Output Types
+
+The writer stage (`apps/api/src/workers/writer.worker.ts`) scores every
+prospect against a fixed, weighted ICP qualification framework (5
+criteria, max 10, threshold 6) before writing anything, then produces
+exactly one of three mutually exclusive outputs — `session.output`'s first
+line identifies which:
+
+| Output type | When | First line |
+| --- | --- | --- |
+| Business case | Score ≥ 6, and retrieval found sufficient playbook context | (none — starts directly with `## Qualification Score`) |
+| Disqualification memo | Score < 6, regardless of retrieved context | `This is a disqualification memo, not a business case.` |
+| Qualified — no playbook coverage | Score ≥ 6, but retrieval found no/insufficient context | `This prospect qualifies, but no playbook context was available — this is a coverage gap, not a disqualification.` |
+
+The distinction between the last two matters: a prospect that qualifies
+but hit an empty corpus is a **system-side coverage gap** (fix: ingest a
+relevant playbook and re-run), not a reason to tell the prospect no. The
+Session detail page's badge (`apps/web/components/ui/OutputTypeBadge.tsx`)
+classifies a completed session by matching these same literal opening
+lines.
+
+Every offering, pricing figure, or case-study detail in a business case
+must be traceable to a specific retrieved passage — the prompt explicitly
+forbids inventing one. **A known model-reliability limitation**: live
+verification against real Groq (`llama-3.3-70b-versatile`) showed that
+even after two rounds of prompt hardening, the model doesn't perfectly
+apply this 100% of the time — observed failures were a tier
+recommendation inconsistent across sections of the same output (naming an
+ineligible tier in the Executive Summary while correctly naming the
+eligible one in Proposed Actions) and, on a prospect scoring very close to
+the threshold, selecting the wrong one of the three output types relative
+to its own computed score. No run fabricated a pricing figure, case study,
+or product capability not present in retrieved context. This is prompt-
+following variance in the underlying LLM, not a retrieval or grounding-
+architecture bug — see `apps/api/src/workers/writer.worker.ts`'s
+`WRITER_SYSTEM_PROMPT` comments for what's already been tried.
+
 ### WebSocket (Elysia — same port via upgrade)
 
 **Connect:** `wss://your-backend-url/ws/session/:sessionId`
@@ -357,6 +395,50 @@ score means real semantic relevance.
 ```
 
 ---
+
+## Testing and Evaluation
+
+```bash
+cd apps/api
+bun test          # or: bun run test (from repo root)
+```
+
+Runs against local Postgres/Redis (`compose.local.yml`) with the Groq LLM
+mocked automatically (`bun test` sets `NODE_ENV=test`, which
+`lib/groq.ts`'s `isMockMode()` treats the same as `USE_MOCK_LLM=true`).
+Currently covers `rag/context.ts` (colocated unit test) and the full
+research → write pipeline via `apps/api/src/agents/orchestrator.test.ts`,
+which starts the real BullMQ workers and the real orchestrator hand-off
+against the real local databases — only the LLM call itself is stubbed.
+The mock (`lib/groq.ts`) recognizes the writer's qualification prompt and
+returns a realistic-shaped business case or disqualification memo per
+named fixture (see below), so these tests assert on output *structure*
+(correct case selected, session reaches `complete`, no crash) — not
+grounding or prompt quality, which mocking can't meaningfully exercise.
+
+**Named fixtures** (`apps/api/src/fixtures/prospects/*.fixture.ts`, reused
+by the test above and by live-eval):
+
+- `corvid-analytics.fixture.ts` — strong ICP fit (funded B2B SaaS,
+  35-rep sales org, named competitor complaint); expected to qualify and
+  produce a business case.
+- `harlow-finch.fixture.ts` — weak ICP fit (family bookstore, no
+  dedicated sales team, no budget); expected to fail qualification.
+
+```bash
+cd apps/api
+bun run live-eval
+```
+
+Runs both fixtures through the same real pipeline against the **real**
+Groq API (not mocked) and prints each session's output plus its retrieval
+trace, for a human to score grounding quality — e.g. did a business case
+cite only figures actually present in the retrieved playbook, did a
+disqualified/no-coverage memo avoid inventing a product fit. Deliberately
+**not** part of `bun test` or CI: it spends real Groq quota and its
+output requires human judgment, not an `assert()`. See [Writer Output
+Types](#writer-output-types) above for a known limitation this script
+surfaced.
 
 ## Infrastructure Costs
 
@@ -396,8 +478,8 @@ The current build is a working skeleton demonstrating the core technical pattern
 - Multi-playbook support with per-session context selection
 - Queue dashboard (BullMQ Board UI)
 - Auth (Clerk or NextAuth)
-- Document management UI (delete, re-embed)
-- Evaluation harness for RAG retrieval quality
+- Document management UI — `DELETE /api/v1/documents/:id` and `POST /api/v1/documents/:id/reembed` exist as API endpoints; there's still no delete button in the Playbooks page UI itself
+- Evaluation harness for RAG retrieval quality — a minimal version exists: `bun test` (mocked-LLM plumbing/structure tests) and `bun run live-eval` (real-Groq grounding checks against named fixtures, see [Testing and Evaluation](#testing-and-evaluation)); a fuller harness (larger fixture set, automated scoring) is still future work
 
 ---
 

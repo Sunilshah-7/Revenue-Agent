@@ -133,14 +133,14 @@ apps/api/
 │   ├── ws/
 │   │   └── session.ts          # Elysia WebSocket handler /ws/session/:id
 │   ├── agents/
-│   │   ├── orchestrator.ts     # OrchestratorAgent — dispatches sub-tasks
+│   │   ├── orchestrator.ts     # OrchestratorAgent (starts research) + registerResearchToWriterHandoff()
 │   │   ├── researcher.ts       # ResearchAgent — retrieves + synthesizes
 │   │   └── writer.ts           # WriterAgent — generates business case text
 │   ├── workers/
 │   │   ├── queue.ts            # BullMQ Queue + Worker definitions
 │   │   ├── embed.worker.ts     # Chunk text → embed → upsert to pgvector
 │   │   ├── research.worker.ts  # RAG retrieval + Groq completion
-│   │   └── writer.worker.ts    # Business case generation
+│   │   └── writer.worker.ts    # ICP qualification scoring + one of 3 output types
 │   ├── rag/
 │   │   ├── embed.ts            # Local deterministic 768-dim embeddings
 │   │   ├── retrieve.ts         # pgvector similarity search
@@ -199,9 +199,11 @@ immediately in the same request, since it will never receive an embed job
 to complete it. `POST /api/v1/documents/:id/reembed` repairs a `failed`
 document (or one ingested before `status` existed) by deleting its chunks
 and re-running chunking/embedding against its already-stored `content` —
-no re-upload needed. See [Document Ingestion Status](README.md#document-ingestion-status)
-in the README for the full status lifecycle and the endpoint's request/response
-shape.
+no re-upload needed. `DELETE /api/v1/documents/:id` removes a document and
+its chunks entirely in one query (`document_chunks.doc_id` has `ON DELETE
+CASCADE`); 404 if the id doesn't exist. See [Document Ingestion
+Status](README.md#document-ingestion-status) in the README for the full
+status lifecycle and both endpoints' request/response shapes.
 
 ### 2. Agent Session (Research → Write)
 
@@ -229,12 +231,17 @@ BullMQ research.worker
         ├── Call Groq (llama-3.3-70b) with retrieved context (or an explicit
         │   "no playbook context found" note if nothing cleared the threshold)
         ├── Emit streaming tokens → Redis pub/sub → Elysia WS → client
-        └── On complete → enqueue "writer" job
+        └── Return { summary, retrievedContext, hasContext } — read by
+            registerResearchToWriterHandoff() in agents/orchestrator.ts,
+            which enqueues the "write" job with all three fields
 
 BullMQ writer.worker
         │
-        ├── Receive research summary
-        ├── Call Groq to generate business case
+        ├── Receive research summary + raw retrievedContext/hasContext
+        ├── Call Groq: score a fixed ICP qualification framework first, then
+        │   produce exactly one of three outputs — business case,
+        │   disqualification memo, or "qualified, no playbook coverage" —
+        │   see [Writer Output Types](README.md#writer-output-types)
         ├── Emit final output → WebSocket
         └── UPDATE sessions SET status="complete", output=...
 ```
