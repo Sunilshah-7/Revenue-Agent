@@ -185,6 +185,63 @@ export function createDocsRouter(api: Hono) {
         },
       },
     })
+    .delete("/api/v1/documents/:id", forward, {
+      detail: {
+        tags: ["Documents"],
+        summary: "Delete a document",
+        description:
+          "Removes a document and all its chunks in one query " +
+          "(`document_chunks.doc_id` has `ON DELETE CASCADE`). The only " +
+          "way to remove a document ingested by mistake or during " +
+          "test/debugging without a DB shell.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Document and its chunks deleted.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    documentId: { type: "string", format: "uuid" },
+                    deleted: { type: "boolean", enum: [true] },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "The id path parameter was not a valid UUID.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+          "404": {
+            description: "No document with that id.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
     .post("/api/v1/documents/:id/reembed", forward, {
       detail: {
         tags: ["Documents"],
