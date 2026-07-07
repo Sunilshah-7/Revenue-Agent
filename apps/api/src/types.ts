@@ -16,16 +16,38 @@ export interface SessionInput {
   prospectContext: string;
 }
 
+// What retrieval actually saw for a session's research step — see
+// rag/context.ts and workers/research.worker.ts's persistRetrievalTrace().
+export interface RetrievalTraceChunk {
+  doc_id: string;
+  filename: string;
+  chunk_index: number;
+  score: number;
+  preview: string;
+}
+
+export interface RetrievalTrace {
+  query: string;
+  topK: number;
+  threshold: number;
+  playbookId: string | null;
+  totalCandidates: number;
+  truncated: boolean;
+  chunks: RetrievalTraceChunk[];
+}
+
 // Wire shape returned by GET /api/v1/sessions and GET /api/v1/sessions/:id
 // — note the snake_case error_message/created_at/updated_at, which mirror
 // the Postgres column names directly rather than being camelCased at the
-// API boundary.
+// API boundary. retrieval_trace is null until the research worker's
+// retrieval step has run for this session.
 export interface SessionRecord {
   id: string;
   status: SessionStatus;
   input: SessionInput;
   output: string | null;
   error_message: string | null;
+  retrieval_trace: RetrievalTrace | null;
   created_at: string;
   updated_at: string;
 }

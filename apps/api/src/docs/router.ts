@@ -34,6 +34,34 @@ const sessionRecordSchema: OpenAPIV3.SchemaObject = {
     },
     output: { type: "string", nullable: true },
     error_message: { type: "string", nullable: true },
+    retrieval_trace: {
+      type: "object",
+      nullable: true,
+      description:
+        "What the research stage's retrieval step saw — null until it " +
+        "has run for this session.",
+      properties: {
+        query: { type: "string" },
+        topK: { type: "integer" },
+        threshold: { type: "number" },
+        playbookId: { type: "string", format: "uuid", nullable: true },
+        totalCandidates: { type: "integer" },
+        truncated: { type: "boolean" },
+        chunks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              doc_id: { type: "string", format: "uuid" },
+              filename: { type: "string" },
+              chunk_index: { type: "integer" },
+              score: { type: "number" },
+              preview: { type: "string" },
+            },
+          },
+        },
+      },
+    },
     created_at: { type: "string", format: "date-time" },
     updated_at: { type: "string", format: "date-time" },
   },
@@ -117,8 +145,10 @@ export function createDocsRouter(api: Hono) {
         tags: ["Documents"],
         summary: "List indexed documents",
         description:
-          "Live inventory ordered by most recently created. Per CLAUDE.md, " +
-          "the Playbooks screen's grid does not call this endpoint yet.",
+          "Live inventory ordered by most recently created, including " +
+          "ingestion status and the actually-embedded chunk count so a " +
+          "document that failed or is still processing is visibly " +
+          "distinguishable from one that is fully searchable.",
         responses: {
           "200": {
             description: "Indexed documents.",
@@ -134,6 +164,12 @@ export function createDocsRouter(api: Hono) {
                         properties: {
                           id: { type: "string", format: "uuid" },
                           filename: { type: "string" },
+                          status: {
+                            type: "string",
+                            enum: ["processing", "ready", "failed"],
+                          },
+                          error_message: { type: "string", nullable: true },
+                          chunk_count: { type: "integer" },
                           created_at: {
                             type: "string",
                             format: "date-time",
@@ -142,6 +178,64 @@ export function createDocsRouter(api: Hono) {
                       },
                     },
                   },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    .post("/api/v1/documents/:id/reembed", forward, {
+      detail: {
+        tags: ["Documents"],
+        summary: "Re-run chunking and embedding for an existing document",
+        description:
+          "Deletes the document's existing chunks and re-chunks/re-embeds " +
+          "its already-stored content from scratch (idempotent). Repairs a " +
+          "document stuck in 'failed' or ingested before status tracking " +
+          "existed, without needing to re-upload the original file.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Chunks cleared and re-embed jobs queued.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    documentId: { type: "string", format: "uuid" },
+                    chunksQueued: { type: "integer" },
+                    status: { type: "string", enum: ["processing", "failed"] },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "The id path parameter was not a valid UUID.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+          "404": {
+            description: "No document with that id.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
                 },
               },
             },

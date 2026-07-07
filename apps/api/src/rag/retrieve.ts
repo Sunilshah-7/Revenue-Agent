@@ -12,6 +12,20 @@ export interface RetrievedChunk {
   metadata: Record<string, unknown>;
 }
 
+// Recalibrated against a real measured score distribution across two
+// full-length sample playbooks (SaaS and healthcare) and three prospect
+// contexts — see Architecture.md's embedding-quality limitation note for
+// the full numbers. The old 0.1 threshold only screened a flat noise floor
+// and was measured against short, low-overlap fixture text; once real
+// long-form playbooks are in the corpus, two on-topic-sounding but
+// wrong-domain documents (both being "playbook"-shaped, with "pricing
+// tiers" and "case studies") produce lexical hash overlap up to 0.371,
+// while genuine same-playbook matches never scored below 0.4222 across
+// every fixture tested. 0.40 sits in that gap. This is still a coarse
+// guard, not a precision filter — retrieval_trace (see research.worker.ts)
+// remains the actual diagnostic tool for judging match quality.
+export const MIN_SIMILARITY_THRESHOLD = 0.4;
+
 export async function retrieveTopChunks(
   query: string,
   topK = 5,
@@ -47,5 +61,21 @@ export async function retrieveTopChunks(
     params,
   );
 
-  return result.rows;
+  return result.rows.filter((row) => row.score >= MIN_SIMILARITY_THRESHOLD);
+}
+
+// Total chunks a retrieval call could have drawn from, for the
+// retrieval_trace's "candidates considered" field — lets a later reader
+// tell "only 2 chunks existed in the whole index" apart from "500 chunks
+// existed and none scored above threshold".
+export async function countIndexedChunks(documentId?: string): Promise<number> {
+  const result = await db.query<{ count: string }>(
+    `
+      SELECT COUNT(*) FROM document_chunks
+      ${documentId ? "WHERE doc_id = $1" : ""}
+    `,
+    documentId ? [documentId] : [],
+  );
+
+  return Number(result.rows[0].count);
 }

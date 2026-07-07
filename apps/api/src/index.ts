@@ -7,6 +7,7 @@ import { Elysia } from "elysia";
 import { openapi } from "@elysiajs/openapi";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { markSessionError, registerResearchToWriterHandoff } from "./agents/orchestrator";
 import { db } from "./db/client";
 import { env } from "./lib/env";
 import { logger } from "./lib/logger";
@@ -18,15 +19,9 @@ import { createDocsRouter } from "./docs/router";
 import { startEmbedWorker } from "./workers/embed.worker";
 import { startResearchWorker } from "./workers/research.worker";
 import { startWriterWorker } from "./workers/writer.worker";
-import {
-  researchQueue,
-  researchQueueEvents,
-  writerQueue,
-} from "./workers/queue";
+import { embedQueue, embedQueueEvents } from "./workers/queue";
 import {
   initializeSessionEventBridge,
-  publishSessionEvent,
-  publishSessionStatus,
   registerSessionSocket,
   unregisterSessionSocket,
 } from "./ws/session";
@@ -61,85 +56,10 @@ const embedWorker = startEmbedWorker();
 const researchWorker = startResearchWorker();
 const writerWorker = startWriterWorker();
 
-// This listener is the hinge of the orchestration pipeline: it is what
-// advances a session from "researching" to "writing" once the research
-// worker's job resolves, by reading the research summary out of the job's
-// return value and enqueueing the writer job with it. There is no direct
-// call from the research worker into the writer queue — this decoupling
-// through QueueEvents is what lets research and writing be retried,
-// observed, and scaled independently (see Active Decisions Log).
-researchQueueEvents.on("completed", async ({ jobId, returnvalue }) => {
-  if (!jobId) {
-    return;
-  }
-
-  const job = await researchQueue.getJob(jobId);
-  if (!job) {
-    return;
-  }
-
-  const sessionId = job.data.sessionId as string;
-  const prospectContext = job.data.input.prospectContext;
-
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'writing', updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId],
-  );
-
-  await publishSessionStatus(sessionId, "writing");
-
-  // Retries/backoff/removeOnFail are set per-enqueue rather than as a queue
-  // default so the writer stage's retry policy can diverge from research's
-  // if needed; removeOnFail: false keeps failed writer jobs around for
-  // inspection instead of silently discarding them.
-  await writerQueue.add(
-    "write",
-    {
-      sessionId,
-      prospectContext,
-      researchSummary: String(returnvalue ?? ""),
-    },
-    {
-      attempts: 3,
-      backoff: { type: "exponential", delay: 500 },
-      removeOnComplete: { age: 3600 },
-      removeOnFail: false,
-    },
-  );
-});
-
-// If research itself fails (after its own retries are exhausted), the
-// session is terminally marked "error" and the writer stage never runs —
-// there is no partial/fallback business case.
-researchQueueEvents.on("failed", async ({ jobId, failedReason }) => {
-  if (!jobId) {
-    return;
-  }
-
-  const job = await researchQueue.getJob(jobId);
-  const sessionId = job?.data.sessionId;
-  if (!sessionId) {
-    return;
-  }
-
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'error', error_message = $2, updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId, failedReason ?? "Research failed"],
-  );
-
-  await publishSessionEvent(sessionId, {
-    type: "error",
-    message: failedReason ?? "Research failed",
-  });
-});
+// Registers the research -> write hand-off (see agents/orchestrator.ts) —
+// extracted there so a test harness or the live-eval script can wire up
+// the same real orchestration logic without duplicating it.
+registerResearchToWriterHandoff();
 
 // Mirror of the research-failure handler, but bound directly to the writer
 // Worker's "failed" event instead of QueueEvents — both approaches exist
@@ -151,19 +71,7 @@ writerWorker.on("failed", async (job, error) => {
     return;
   }
 
-  await db.query(
-    `
-      UPDATE sessions
-      SET status = 'error', error_message = $2, updated_at = NOW()
-      WHERE id = $1
-    `,
-    [sessionId, error.message],
-  );
-
-  await publishSessionEvent(sessionId, {
-    type: "error",
-    message: error.message,
-  });
+  await markSessionError(sessionId, error.message);
 });
 
 // "error" events are BullMQ/Redis-connection-level failures (distinct from
@@ -179,6 +87,71 @@ researchWorker.on("error", (error) => {
 
 embedWorker.on("error", (error) => {
   logger.error("Embed worker runtime error", error.message);
+});
+
+// Flips a document to 'ready' once every one of its chunks has an embedded
+// row — chunks_total was recorded at upload time (routes/documents.ts), so
+// reaching it here means ingestion is actually complete, not just queued.
+// Guarded by `status != 'failed'` so a chunk that finishes after a sibling
+// chunk already failed the document can't resurrect it to 'ready'.
+embedQueueEvents.on("completed", async ({ jobId }) => {
+  if (!jobId) {
+    return;
+  }
+
+  const job = await embedQueue.getJob(jobId);
+  const docId = job?.data.docId as string | undefined;
+  if (!docId) {
+    return;
+  }
+
+  await db.query(
+    `
+      UPDATE documents d
+      SET status = 'ready'
+      WHERE d.id = $1
+        AND d.status != 'failed'
+        AND d.chunks_total <= (
+          SELECT COUNT(*) FROM document_chunks c
+          WHERE c.doc_id = $1 AND c.embedding IS NOT NULL
+        )
+    `,
+    [docId],
+  );
+});
+
+// A chunk's embed job exhausting its retries means that document's index is
+// permanently incomplete — mark it 'failed' with the reason rather than
+// leaving it stuck in 'processing' with no signal anything went wrong.
+// Guarded by `status != 'ready'` for the same reason as above: a
+// already-completed document should not be downgraded by a late/duplicate
+// failure event.
+embedQueueEvents.on("failed", async ({ jobId, failedReason }) => {
+  if (!jobId) {
+    return;
+  }
+
+  const job = await embedQueue.getJob(jobId);
+  const docId = job?.data.docId as string | undefined;
+  if (!docId) {
+    return;
+  }
+
+  logger.error("Embed job failed, marking document failed", {
+    docId,
+    filename: job?.data.filename,
+    chunkIndex: job?.data.chunkIndex,
+    failedReason,
+  });
+
+  await db.query(
+    `
+      UPDATE documents
+      SET status = 'failed', error_message = $2
+      WHERE id = $1 AND status != 'ready'
+    `,
+    [docId, failedReason ?? "Embedding failed"],
+  );
 });
 
 // Subscribes this process to Redis pub/sub channels for session events so

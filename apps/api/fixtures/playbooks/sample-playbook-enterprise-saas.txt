@@ -1,0 +1,38 @@
+RevPilot Sales Enablement Playbook — Enterprise B2B SaaS
+
+RevPilot is an AI-assisted account research and business-case generation platform built for B2B sales organizations. It sits alongside the rep's CRM and automatically produces account research, competitive positioning, and a written business case a rep can forward to a procurement committee, cutting the hours reps otherwise spend manually assembling that material by hand.
+
+PRICING TIERS
+
+Growth tier: $89 per seat per month, billed annually. Growth is designed for sales organizations with 10 to 49 licensed seats. It includes unlimited account research runs, the full business-case generator, and standard CRM sync (read-only) for Salesforce and HubSpot.
+
+Enterprise tier: custom pricing, with a 50-seat minimum commitment. Enterprise unlocks bidirectional CRM write-back (RevPilot can push generated research and business-case artifacts directly into Salesforce or HubSpot records, not just read from them), SSO/SAML, a dedicated customer success manager, and a custom-trained retrieval index over the customer's own playbook and case-study library.
+
+A sales organization below the 50-seat Enterprise minimum should be quoted Growth, not Enterprise, regardless of deal size or ambition — do not discount the Enterprise minimum to accommodate a smaller team; Growth already covers their functional needs at a lower cost per seat.
+
+Q3 CLOSE INCENTIVE
+
+Any new customer who signs by the end of Q3 may choose one of the following, but not both: an 18% discount on the annual contract value, or a fully waived implementation fee (implementation fee is otherwise $4,500 flat, regardless of tier or seat count). This incentive is not stackable with any other discount and expires at the Q3 close date.
+
+COMPETITIVE POSITIONING — PROSPECTIQ
+
+ProspectIQ is a call-intelligence and conversation-analytics competitor. Its core strength is transcribing and scoring live sales calls. Its most common complaint from switching customers is that it cannot write generated insights back into Salesforce — reps have to manually copy call summaries and next steps into their CRM by hand, which erodes the tool's time savings and creates CRM hygiene gaps. When a prospect currently trials or uses ProspectIQ and raises this complaint, lead with RevPilot's Enterprise-tier bidirectional Salesforce write-back as the direct displacement angle: RevPilot doesn't just analyze — it writes the resulting research and business case straight into the account record, closing the exact gap ProspectIQ leaves open. Do not claim RevPilot replaces live call transcription; it does not. Position it as complementary research/business-case tooling that closes ProspectIQ's write-back gap, not a like-for-like call-intelligence replacement.
+
+CASE STUDY — NORTHWIND LOGISTICS
+
+Northwind Logistics, a Series C supply-chain SaaS company with a 40-person sales organization, adopted RevPilot's Enterprise tier after reps reported spending an average of 5.2 hours per week manually researching accounts before a first call. Within one quarter of rollout, Northwind reported: manual account-research time per rep dropped from 5.2 hours/week to 1.1 hours/week (a 79% reduction); the average sales cycle for deals involving a written business case shortened from 71 days to 54 days; and win rate on procurement-committee deals (deals requiring a forwarded business case) improved from 22% to 31%. Northwind's VP of Sales attributed the win-rate improvement specifically to reps forwarding a RevPilot-generated business case earlier in the cycle, before a competing vendor could frame the narrative first.
+
+DISCOVERY FRAMEWORK — MEDDPICC
+
+Reps should structure enterprise discovery calls around MEDDPICC before generating a business case, since a business case built on an under-qualified deal wastes both the rep's time and the prospect's attention:
+
+- Metrics: what quantified pain is the prospect tracking today (e.g., hours per week on manual research, sales cycle length, win rate on committee deals)?
+- Economic buyer: who has budget authority to approve this purchase, and what is their approval ceiling?
+- Decision criteria: what capabilities or proof points will this buyer actually weigh (e.g., CRM write-back, case-study evidence, security review)?
+- Decision process: how many stakeholders are involved, and in what order do they need to sign off?
+- Paper process: what does procurement/legal review look like, and how long does it typically take at this account?
+- Identify pain: what specific, named trigger event or complaint (e.g., a competitor's tool falling short) brought this evaluation to the table right now?
+- Champion: who inside the account is motivated to advocate for this purchase internally, and do they have the credibility to do so?
+- Competition: what alternative — including "do nothing" — is the prospect weighing this against?
+
+A prospect who can answer Metrics, Economic buyer, and Identify pain concretely, and who names a specific competitive displacement trigger (such as a ProspectIQ write-back complaint), is a strong candidate for a full business case built directly on this playbook's pricing, positioning, and Northwind proof points.

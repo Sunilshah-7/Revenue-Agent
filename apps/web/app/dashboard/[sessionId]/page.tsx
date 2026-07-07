@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { RetrievalTracePanel } from "../../../components/RetrievalTracePanel";
 import { StreamPanel } from "../../../components/StreamPanel";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { getSession } from "../../../lib/api";
@@ -50,6 +51,8 @@ export default async function SessionDashboardPage({
             updatedAt={session.updated_at}
           />
         </div>
+
+        <RetrievalTracePanel trace={session.retrieval_trace} />
       </div>
     </main>
   );

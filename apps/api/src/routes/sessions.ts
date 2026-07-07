@@ -60,12 +60,16 @@ sessionsRouter.post("/api/v1/sessions", async (c) => {
 
 // Persisted session detail — per CLAUDE.md, the Live Session screen still
 // animates seeded content instead of calling this and the WS endpoint.
+// retrieval_trace is included (safe: this is a portfolio project without
+// auth) so a caller can see exactly what the research stage retrieved
+// without re-running SQL by hand — null until the research worker's
+// retrieval step has run for this session.
 sessionsRouter.get("/api/v1/sessions/:id", async (c) => {
   const id = c.req.param("id");
 
   const result = await db.query(
     `
-      SELECT id, status, input, output, error_message, created_at, updated_at
+      SELECT id, status, input, output, error_message, retrieval_trace, created_at, updated_at
       FROM sessions
       WHERE id = $1
       LIMIT 1

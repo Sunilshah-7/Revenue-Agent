@@ -6,9 +6,17 @@
 import { z } from "zod";
 
 const envSchema = z.object({
-  // "local" flips on the superRefine guardrails below; "hosted" (default)
-  // is the Railway/production posture with no loopback restriction.
+  // "local" flips on the superRefine loopback guardrails below for
+  // DATABASE_URL/REDIS_HOST; "hosted" (default) is the Railway/production
+  // posture with no loopback restriction. This is independent of whether
+  // the Groq LLM call is mocked — see USE_MOCK_LLM.
   APP_ENV: z.enum(["local", "hosted"]).default("hosted"),
+  // Bun/Node standard; used only to gate the Groq mock for automated test
+  // runs (NODE_ENV=test) without requiring every test file to also set
+  // USE_MOCK_LLM.
+  NODE_ENV: z
+    .enum(["development", "production", "test"])
+    .default("development"),
   DATABASE_URL: z.string().min(1),
   REDIS_HOST: z.string().min(1),
   REDIS_PORT: z.coerce.number().default(6379),
@@ -19,21 +27,31 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .default("true")
     .transform((value) => value === "true"),
-  // "mock" short-circuits lib/groq.ts to a deterministic canned completion
-  // with no network call, so local dev/tests never spend Groq's metered
-  // free-tier quota.
-  GROQ_MODE: z.enum(["live", "mock"]).default("live"),
+  // Explicit, opt-in escape hatch that short-circuits lib/groq.ts to a
+  // deterministic canned completion with no network call. Defaults to
+  // "false" everywhere (dev and prod alike) — it must be set on purpose in
+  // a test/local env file, never inferred from APP_ENV or from a missing
+  // GROQ_API_KEY, so a misconfigured dev/prod environment fails loudly
+  // instead of silently serving mock output.
+  USE_MOCK_LLM: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   GROQ_API_KEY: z.string().min(1).optional(),
   PORT: z.coerce.number().default(3001),
   FRONTEND_URL: z.string().default("http://localhost:3000"),
 }).superRefine((values, context) => {
+  const mockActive = values.NODE_ENV === "test" || values.USE_MOCK_LLM;
+
   // GROQ_API_KEY is conditionally required: only when a real API call will
-  // actually be made.
-  if (values.GROQ_MODE === "live" && !values.GROQ_API_KEY) {
+  // actually be made. Every other environment (including APP_ENV=local
+  // dev) must provide a real key and hit the real Groq API.
+  if (!mockActive && !values.GROQ_API_KEY) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["GROQ_API_KEY"],
-      message: "GROQ_API_KEY is required when GROQ_MODE=live",
+      message:
+        "GROQ_API_KEY is required unless NODE_ENV=test or USE_MOCK_LLM=true",
     });
   }
 
@@ -74,19 +92,26 @@ const envSchema = z.object({
       message: "APP_ENV=local only permits a loopback Redis host",
     });
   }
-
-  // Local mode forces the Groq mock path unconditionally — there is no way
-  // to run APP_ENV=local against the real Groq API even intentionally.
-  if (values.GROQ_MODE !== "mock") {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["GROQ_MODE"],
-      message: "APP_ENV=local requires GROQ_MODE=mock",
-    });
-  }
 });
 
 // Parsed once at import time; every other module imports this `env` object
 // rather than reading process.env directly, so validation always runs
-// before any route/worker code executes.
-export const env = envSchema.parse(process.env);
+// before any route/worker code executes. A parse failure means the process
+// cannot safely run (e.g. a missing GROQ_API_KEY outside mock mode) — log a
+// readable summary of what's wrong and exit instead of letting a raw ZodError
+// stack trace be the only signal, and instead of ever falling back to mock.
+let parsedEnv: z.infer<typeof envSchema>;
+try {
+  parsedEnv = envSchema.parse(process.env);
+} catch (error) {
+  const details =
+    error instanceof z.ZodError
+      ? error.issues.map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`).join("\n")
+      : String(error);
+  console.error(
+    `[${new Date().toISOString()}] ERROR Invalid environment configuration, refusing to start:\n${details}`,
+  );
+  process.exit(1);
+}
+
+export const env = parsedEnv;

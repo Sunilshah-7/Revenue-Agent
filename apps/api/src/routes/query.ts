@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { db } from "../db/client";
 import { createCompletion, streamCompletion } from "../lib/groq";
+import { assembleContext } from "../rag/context";
 import { retrieveTopChunks } from "../rag/retrieve";
 import type { SessionWsEvent } from "../types";
 import { publishSessionEvent } from "../ws/session";
@@ -158,13 +159,11 @@ queryRouter.post("/api/v1/query", async (c) => {
       querySchema.parse(body);
     const scopedPlaybookId = await resolvePlaybookId(sessionId, playbookId);
 
-    const chunks = await retrieveTopChunks(query, topK ?? 5, scopedPlaybookId);
-    const context = chunks
-      .map(
-        (chunk, index) =>
-          `[#${index + 1}] score=${chunk.score.toFixed(4)}\n${chunk.content}`,
-      )
-      .join("\n\n");
+    const retrieved = await retrieveTopChunks(query, topK ?? 5, scopedPlaybookId);
+    // Deduped and word-budget-capped the same way research.worker.ts
+    // assembles context — `chunks` in the response reflects what the
+    // answer was actually grounded in, not the pre-cap retrieval set.
+    const { context, usedChunks } = assembleContext(retrieved);
 
     const messages = buildQueryMessages(query, context);
     // SSE mode can be requested either explicitly (`stream: true` in the
@@ -178,7 +177,7 @@ queryRouter.post("/api/v1/query", async (c) => {
 
     const answer = await createCompletion(messages);
 
-    return c.json({ answer, chunks });
+    return c.json({ answer, chunks: usedChunks });
   } catch (error) {
     return c.json(
       { error: error instanceof Error ? error.message : "Invalid request" },

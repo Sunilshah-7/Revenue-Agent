@@ -12,6 +12,7 @@ import { connectSessionStream } from "../lib/ws-client";
 import { formatRelativeTime } from "../lib/format";
 import type { SessionStatus, WsMessage } from "../types";
 import { StreamedMarkdown } from "./StreamedMarkdown";
+import { OutputTypeBadge } from "./ui/OutputTypeBadge";
 
 const STAGES: { key: Extract<SessionStatus, "researching" | "writing" | "complete">; label: string }[] = [
   { key: "researching", label: "Researching" },
@@ -145,9 +146,12 @@ export function StreamPanel({
     <div className="rounded-card border border-border-subtle bg-bg-surface">
       <div className="flex items-center justify-between border-b border-border-subtle px-6 py-4">
         <Stepper status={status} />
-        <span className="font-mono text-[11px] text-text-secondary">
-          {output.length.toLocaleString()} chars streamed
-        </span>
+        <div className="flex items-center gap-3">
+          {status === "complete" ? <OutputTypeBadge output={output} /> : null}
+          <span className="font-mono text-[11px] text-text-secondary">
+            {output.length.toLocaleString()} chars streamed
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-1 px-6 py-3 text-[11px] text-text-secondary">

@@ -104,10 +104,13 @@ cd ../api && bun install
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE documents (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  filename   TEXT NOT NULL,
-  content    TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  filename      TEXT NOT NULL,
+  content       TEXT NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'processing', -- processing | ready | failed
+  error_message TEXT,
+  chunks_total  INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE document_chunks (
@@ -123,17 +126,25 @@ CREATE INDEX ON document_chunks
   USING hnsw (embedding vector_cosine_ops);
 
 CREATE TABLE sessions (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  status        TEXT NOT NULL DEFAULT 'idle',
-  input         JSONB NOT NULL,
-  output        TEXT,
-  error_message TEXT,
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ DEFAULT NOW()
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status          TEXT NOT NULL DEFAULT 'idle',
+  input           JSONB NOT NULL,
+  output          TEXT,
+  error_message   TEXT,
+  retrieval_trace JSONB,
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ DEFAULT NOW()
 );
 ```
 
 3. Copy the **pooled connection string** from your Neon dashboard.
+
+> **Existing hosted database?** These columns were added in
+> `apps/api/src/db/migrations/002_document_status_and_retrieval_trace.sql`.
+> Run that file's statements (it's idempotent — `ADD COLUMN IF NOT EXISTS`)
+> against your Neon database to pick them up without recreating tables. See
+> [Document Ingestion Status](#document-ingestion-status) and
+> [Retrieval Trace](#retrieval-trace) below for what they're for.
 
 ### 3. Set up Upstash (Redis)
 
@@ -157,10 +168,12 @@ REDIS_HOST=your-db.upstash.io
 REDIS_PORT=6379
 REDIS_PASSWORD=your-upstash-password
 REDIS_TLS=true
-GROQ_API_KEY=gsk_...
+GROQ_API_KEY=gsk_...                # required unless USE_MOCK_LLM=true
 PORT=3001
 FRONTEND_URL=http://localhost:3000
 ```
+
+`USE_MOCK_LLM` (default `false`) is a test-only escape hatch that returns a canned completion instead of calling Groq. Leave it unset here — every dev/prod run must hit the real Groq API. It's set to `true` only in `apps/api/.env.local.example`, and is otherwise activated by the test runner via `NODE_ENV=test`.
 
 **Frontend** — create `apps/web/.env.local`:
 
@@ -238,13 +251,133 @@ For an interactive, browsable version of everything below (with "try it out" aga
 
 | Method | Path                   | Description                           |
 | ------ | ---------------------- | ------------------------------------- |
-| `GET`  | `/health`              | Health check                          |
-| `POST` | `/api/v1/documents`    | Upload and ingest a playbook document |
-| `GET`  | `/api/v1/documents`    | List all ingested documents           |
-| `GET`  | `/api/v1/sessions`     | List recent agent sessions            |
-| `POST` | `/api/v1/sessions`     | Start a new agent session             |
-| `GET`  | `/api/v1/sessions/:id` | Get session status and output         |
-| `POST` | `/api/v1/query`        | One-shot RAG query against playbooks  |
+| `GET`  | `/health`                       | Health check                                   |
+| `POST` | `/api/v1/documents`             | Upload and ingest a playbook document          |
+| `GET`  | `/api/v1/documents`             | List all ingested documents, with status       |
+| `POST` | `/api/v1/documents/:id/reembed` | Re-chunk/re-embed an existing document         |
+| `DELETE` | `/api/v1/documents/:id`       | Delete a document and its chunks (cascades); 404 if not found |
+| `GET`  | `/api/v1/sessions`              | List recent agent sessions                     |
+| `POST` | `/api/v1/sessions`              | Start a new agent session                      |
+| `GET`  | `/api/v1/sessions/:id`          | Get session status, output, and retrieval trace |
+| `POST` | `/api/v1/query`                 | One-shot RAG query against playbooks           |
+
+**`POST /api/v1/sessions` request body** — `playbookId` is optional (omit it to search across all indexed playbooks):
+
+```json
+{ "prospectContext": "Series B fintech hiring 30 account executives", "playbookId": "7ddf80a5-9807-45a2-a2c3-dac090a83871" }
+```
+
+```json
+{ "sessionId": "1dd1d470-b0ee-4f0f-a48f-f780c0faf25c", "status": "researching" }
+```
+
+### Document Ingestion Status
+
+Every document has a `status`: `processing` (embed jobs still running),
+`ready` (every expected chunk is chunked and embedded), or `failed` (a
+chunk's embed job exhausted its retries, or the document produced zero
+chunks). `GET /api/v1/documents` returns `status`, `error_message`, and
+`chunk_count` (the actually-embedded count, which can differ from
+`chunks_total` while a document is still `processing`) per document — so a
+document that "exists" but is unsearchable is visibly distinguishable from
+one that's fully indexed, instead of looking identical to both a human and
+to retrieval.
+
+To repair a `failed` document (or one ingested before this column
+existed) without re-uploading the original file:
+
+```bash
+curl -X POST http://localhost:3001/api/v1/documents/<id>/reembed
+# { "documentId": "<id>", "chunksQueued": 3, "status": "processing" }
+```
+
+This deletes the document's existing chunks and re-chunks/re-embeds its
+already-stored `content` from scratch — safe to call more than once.
+
+**A crash mid-ingestion is self-healing, within a bound.** Since embed jobs
+run as BullMQ jobs, killing the process while one is in flight leaves the
+document in `processing`, but BullMQ's stalled-job detection reassigns
+that job once any worker resumes polling the `embed` queue (verified
+locally: recovery happened within its default ~30s `stalledInterval`
+after restart) — the document then completes normally, or is marked
+`failed` if it keeps stalling past `maxStalledCount`. The one case this
+doesn't cover is a worker that never restarts at all (a permanently dead
+deployment), which would leave a document in `processing` indefinitely
+with no automatic recovery; a periodic sweep marking long-`processing`
+documents `failed` would close that gap, but isn't implemented here.
+
+### Retrieval Trace
+
+`GET /api/v1/sessions/:id` includes `retrieval_trace`, populated once the
+research stage's retrieval step has run for that session (`null` before
+then):
+
+```json
+{
+  "query": "...",
+  "topK": 5,
+  "threshold": 0.4,
+  "playbookId": null,
+  "totalCandidates": 3,
+  "truncated": false,
+  "chunks": [
+    { "doc_id": "...", "filename": "sample-playbook-enterprise-saas.txt", "chunk_index": 0, "score": 0.4225, "preview": "RevPilot Sales Enablement Playbook — Enterprise B2B SaaS..." }
+  ]
+}
+```
+
+`threshold` is `MIN_SIMILARITY_THRESHOLD` from `apps/api/src/rag/retrieve.ts`
+— chunks scoring below it are dropped before they ever reach the LLM
+prompt. **Embeddings are a known limitation**, not retrieval logic: per the
+Tech Stack table, `rag/embed.ts` is a local deterministic lexical hashing
+scheme (shared word/bigram hash-bucket overlap), not a learned semantic
+embedding, so its cosine scores don't cleanly separate "relevant" from
+"irrelevant" — two full-length playbooks on similar topics (e.g. both
+being enablement docs with pricing tiers and a case study) can score up to
+~0.37 cosine similarity against an unrelated prospect purely from shared
+sales-document vocabulary, well above the old 0.1 threshold. See
+[Architecture.md](./Architecture.md#key-design-decisions) for the measured
+distribution behind the current 0.4 threshold. `retrieval_trace` (and the
+Session detail page's "Retrieval trace" panel) is the intended diagnostic
+tool for judging match quality in this system, not a guarantee that a high
+score means real semantic relevance.
+
+### Writer Output Types
+
+The writer stage (`apps/api/src/workers/writer.worker.ts`) scores every
+prospect against a fixed, weighted ICP qualification framework (5
+criteria, max 10, threshold 6) before writing anything, then produces
+exactly one of three mutually exclusive outputs — `session.output`'s first
+line identifies which:
+
+| Output type | When | First line |
+| --- | --- | --- |
+| Business case | Score ≥ 6, and retrieval found sufficient playbook context | (none — starts directly with `## Qualification Score`) |
+| Disqualification memo | Score < 6, regardless of retrieved context | `This is a disqualification memo, not a business case.` |
+| Qualified — no playbook coverage | Score ≥ 6, but retrieval found no/insufficient context | `This prospect qualifies, but no playbook context was available — this is a coverage gap, not a disqualification.` |
+
+The distinction between the last two matters: a prospect that qualifies
+but hit an empty corpus is a **system-side coverage gap** (fix: ingest a
+relevant playbook and re-run), not a reason to tell the prospect no. The
+Session detail page's badge (`apps/web/components/ui/OutputTypeBadge.tsx`)
+classifies a completed session by matching these same literal opening
+lines.
+
+Every offering, pricing figure, or case-study detail in a business case
+must be traceable to a specific retrieved passage — the prompt explicitly
+forbids inventing one. **A known model-reliability limitation**: live
+verification against real Groq (`llama-3.3-70b-versatile`) showed that
+even after two rounds of prompt hardening, the model doesn't perfectly
+apply this 100% of the time — observed failures were a tier
+recommendation inconsistent across sections of the same output (naming an
+ineligible tier in the Executive Summary while correctly naming the
+eligible one in Proposed Actions) and, on a prospect scoring very close to
+the threshold, selecting the wrong one of the three output types relative
+to its own computed score. No run fabricated a pricing figure, case study,
+or product capability not present in retrieved context. This is prompt-
+following variance in the underlying LLM, not a retrieval or grounding-
+architecture bug — see `apps/api/src/workers/writer.worker.ts`'s
+`WRITER_SYSTEM_PROMPT` comments for what's already been tried.
 
 ### WebSocket (Elysia — same port via upgrade)
 
@@ -262,6 +395,50 @@ For an interactive, browsable version of everything below (with "try it out" aga
 ```
 
 ---
+
+## Testing and Evaluation
+
+```bash
+cd apps/api
+bun test          # or: bun run test (from repo root)
+```
+
+Runs against local Postgres/Redis (`compose.local.yml`) with the Groq LLM
+mocked automatically (`bun test` sets `NODE_ENV=test`, which
+`lib/groq.ts`'s `isMockMode()` treats the same as `USE_MOCK_LLM=true`).
+Currently covers `rag/context.ts` (colocated unit test) and the full
+research → write pipeline via `apps/api/src/agents/orchestrator.test.ts`,
+which starts the real BullMQ workers and the real orchestrator hand-off
+against the real local databases — only the LLM call itself is stubbed.
+The mock (`lib/groq.ts`) recognizes the writer's qualification prompt and
+returns a realistic-shaped business case or disqualification memo per
+named fixture (see below), so these tests assert on output *structure*
+(correct case selected, session reaches `complete`, no crash) — not
+grounding or prompt quality, which mocking can't meaningfully exercise.
+
+**Named fixtures** (`apps/api/src/fixtures/prospects/*.fixture.ts`, reused
+by the test above and by live-eval):
+
+- `corvid-analytics.fixture.ts` — strong ICP fit (funded B2B SaaS,
+  35-rep sales org, named competitor complaint); expected to qualify and
+  produce a business case.
+- `harlow-finch.fixture.ts` — weak ICP fit (family bookstore, no
+  dedicated sales team, no budget); expected to fail qualification.
+
+```bash
+cd apps/api
+bun run live-eval
+```
+
+Runs both fixtures through the same real pipeline against the **real**
+Groq API (not mocked) and prints each session's output plus its retrieval
+trace, for a human to score grounding quality — e.g. did a business case
+cite only figures actually present in the retrieved playbook, did a
+disqualified/no-coverage memo avoid inventing a product fit. Deliberately
+**not** part of `bun test` or CI: it spends real Groq quota and its
+output requires human judgment, not an `assert()`. See [Writer Output
+Types](#writer-output-types) above for a known limitation this script
+surfaced.
 
 ## Infrastructure Costs
 
@@ -301,8 +478,8 @@ The current build is a working skeleton demonstrating the core technical pattern
 - Multi-playbook support with per-session context selection
 - Queue dashboard (BullMQ Board UI)
 - Auth (Clerk or NextAuth)
-- Document management UI (delete, re-embed)
-- Evaluation harness for RAG retrieval quality
+- Document management UI — `DELETE /api/v1/documents/:id` and `POST /api/v1/documents/:id/reembed` exist as API endpoints; there's still no delete button in the Playbooks page UI itself
+- Evaluation harness for RAG retrieval quality — a minimal version exists: `bun test` (mocked-LLM plumbing/structure tests) and `bun run live-eval` (real-Groq grounding checks against named fixtures, see [Testing and Evaluation](#testing-and-evaluation)); a fuller harness (larger fixture set, automated scoring) is still future work
 
 ---
 
