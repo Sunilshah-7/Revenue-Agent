@@ -9,3 +9,6 @@ dist
 *.tsbuildinfo
 AGENTS.md
 CLAUDE.md
+
+# nix-direnv cache
+.direnv/

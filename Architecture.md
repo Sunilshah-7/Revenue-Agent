@@ -21,6 +21,7 @@
   - [Deployment Architecture](#deployment-architecture)
   - [Environment Configuration](#environment-configuration)
   - [Key Design Decisions](#key-design-decisions)
+  - [Nix / NixOS](#nix--nixos)
 
 ---
 
@@ -528,5 +529,22 @@ NEXT_PUBLIC_WS_URL=      # Railway WebSocket URL
 | Corvid Analytics (SaaS fit) | 0.4225, 0.4222 (SaaS) | 0.3189, 0.2574 (healthcare) | ≤ 0.0433 |
 | Blue Harbor Health Network (healthcare fit) | 0.6313, 0.5472 (healthcare) | 0.3710, 0.3629 (SaaS) | ≤ 0.0080 |
 | Harlow & Finch (fits neither playbook) | n/a | 0.3190, 0.3170 (SaaS), 0.2816, 0.2509 (healthcare) | ≤ 0.0805 |
+
+---
+
+## Nix / NixOS
+
+`flake.nix` (repo root) provides a reproducible dev shell — `bun`, `nodejs_20`, and `postgresql` (for the `psql` client against Neon) — pinned via `nixpkgs` on the `nixos-unstable` branch, plus `flake-utils` for the multi-system (`eachDefaultSystem`) boilerplate so the same flake works on both macOS and Linux CI. `nix develop` (or `direnv allow`, since `.envrc` contains `use flake` and nix-direnv is wired into the shell) drops you into that shell; the `shellHook` prints the resolved `bun`/`node` versions on entry so the pin is visible, not just assumed.
+
+**Problem this solves:** before this, "install Bun and Node 20" in the README was an instruction, not a guarantee — different contributors (or CI) could end up on different patch versions with no way to notice a drift until something broke in a version-specific way. The flake makes the toolchain itself a checked-in, resolvable artifact.
+
+**`flake.lock` is the part that actually pins anything.** `flake.nix`'s `nixpkgs.url` just says "track the `nixos-unstable` branch" — that's a moving target. `flake.lock` records the exact commit hash (plus a content hash) that `nixos-unstable` resolved to the last time someone ran `nix flake lock` (or `nix develop` for the first time), for both `nixpkgs` and `flake-utils`. Without committing `flake.lock`, every teammate (and CI) would silently resolve `nixos-unstable` to whatever its current HEAD is on the day they run it — the opposite of reproducible. Committing it means `nix develop` gives everyone the identical package set until someone deliberately runs `nix flake update`.
+
+**Tradeoff hit: Bun/Node packaging friction on nixpkgs.** Two distinct issues surfaced setting this up, both worth knowing before treating "it's in nixpkgs" as equivalent to "it's solid":
+
+1. **Bun in nixpkgs is a repackaged prebuilt binary, not built from source.** Bun's own build system is self-hosted (Zig, plus a bootstrapping Bun binary) and isn't practical for nixpkgs to reproduce from source, so the `bun` derivation just fetches and wraps the upstream release binary per platform. The pin guarantees "everyone gets the same bun binary," not "Nix rebuilt Bun reproducibly from source" — it's really nixpkgs acting as a version-pinned, content-hashed download manager for an opaque artifact.
+2. **`nodejs_20` on current `nixos-unstable` is broken, not just deprecated.** Node 20 passed its upstream EOL date, and nixpkgs commit `2600625d0b` (2026-04-20) marked `nodejs_20` as an insecure package. Insecure packages are excluded from Hydra's build farm, so there's no cached binary — allowing it via `permittedInsecurePackages` doesn't unblock a download, it forces a **from-source build**, and that from-source build crashes: clang/LLVM segfaults compiling one of V8's translation units on this machine's toolchain. The fix here was to override just `flake.lock`'s resolved `nixpkgs` input to a pre-2026-04-20 `nixos-unstable` revision (`02d1c9ad58d56732a5ae2412981aca62ac4777fa`, 2026-04-14) via `nix flake lock --override-input nixpkgs github:NixOS/nixpkgs/<rev>` — `nodejs_20` still has a cached binary there. `flake.nix`'s declared `nixpkgs.url` still tracks `nixos-unstable` itself (unchanged), so this is a lock-level pin, not a flake-level one — but it does mean a future `nix flake update` will hit the exact same insecure/from-source-crash problem again if `nodejs_20` is still what's requested at that point, and will need re-resolving the same way (or moving to a newer, non-EOL Node major).
+
+**Constraint this doesn't relax:** the flake pins the *toolchain* (bun/node/psql binaries), not the *application dependency graph*. `bun install` inside the shell still hits the live npm registry, unsandboxed by Nix — reproducing `node_modules` exactly (not just the runtime that installs them) is a separate, harder problem this setup doesn't attempt.
 
 The minimum same-playbook (true-positive) score observed was 0.4222; the maximum cross-playbook (false-positive) score observed was 0.3710 — a real, if narrow, gap. `MIN_SIMILARITY_THRESHOLD` was raised from 0.1 to **0.4**, the midpoint of that gap, so retrieval keeps only chunks from the playbook that actually matches the prospect's domain and excludes same-shape-but-wrong-domain playbooks, across every case measured. This is a threshold recalibration against the same hashing embedder, not a fix to the embedder itself — the gap is real but narrow (~0.05), so a sufficiently similar third playbook (e.g. two different SaaS competitor playbooks) could still bleed together at this threshold; a learned semantic embedding remains the actual fix for that class of ambiguity and is still out of scope for this pass.

@@ -78,6 +78,8 @@ ai-revenue-agent/
 - [Node.js](https://nodejs.org) v20+ (for tooling)
 - Accounts on: [Neon](https://neon.tech), [Upstash](https://upstash.com), [Groq](https://console.groq.com), [Vercel](https://vercel.com), [Railway](https://railway.com)
 
+**With [Nix](https://nixos.org) (recommended):** `flake.nix` pins Bun, Node 20, and the `psql` client to exact versions, so you get the same toolchain as everyone else without installing anything globally. See [Nix / NixOS](./Architecture.md#nix--nixos) in Architecture.md for how it works.
+
 ---
 
 ## Local Development
@@ -87,7 +89,20 @@ ai-revenue-agent/
 ```bash
 git clone https://github.com/your-username/ai-revenue-agent.git
 cd ai-revenue-agent
+```
 
+**With Nix (recommended):**
+
+```bash
+nix develop   # or: direnv allow, if you use direnv — see flake.nix
+
+cd apps/web && bun install
+cd ../api && bun install
+```
+
+**Without Nix (manual fallback):** install Bun v1.1+ and Node.js v20+ yourself, then:
+
+```bash
 # Install frontend deps
 cd apps/web && bun install
 
