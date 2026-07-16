@@ -185,6 +185,133 @@ export function createDocsRouter(api: Hono) {
         },
       },
     })
+    .get("/api/v1/documents/:id/chunks", forward, {
+      detail: {
+        tags: ["Documents"],
+        summary: "List a document's chunks",
+        description:
+          "Returns every document_chunks row for the document — content, " +
+          "chunk index, metadata, and whether it has an embedding yet — so " +
+          "ingestion can be inspected without a direct DB connection. The " +
+          "768-dimension embedding vector itself is omitted; `embedded` " +
+          "reflects whether it's set.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "The document's chunks, ordered by chunk_index.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    documentId: { type: "string", format: "uuid" },
+                    chunks: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string", format: "uuid" },
+                          chunk_index: { type: "integer" },
+                          content: { type: "string" },
+                          metadata: { type: "object" },
+                          embedded: { type: "boolean" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "The id path parameter was not a valid UUID.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+          "404": {
+            description: "No document with that id.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
+    .delete("/api/v1/documents/:id", forward, {
+      detail: {
+        tags: ["Documents"],
+        summary: "Delete a document",
+        description:
+          "Removes a document and all its chunks in one query " +
+          "(`document_chunks.doc_id` has `ON DELETE CASCADE`). The only " +
+          "way to remove a document ingested by mistake or during " +
+          "test/debugging without a DB shell.",
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string", format: "uuid" },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Document and its chunks deleted.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    documentId: { type: "string", format: "uuid" },
+                    deleted: { type: "boolean", enum: [true] },
+                  },
+                },
+              },
+            },
+          },
+          "400": {
+            description: "The id path parameter was not a valid UUID.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+          "404": {
+            description: "No document with that id.",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: { error: { type: "string" } },
+                },
+              },
+            },
+          },
+        },
+      },
+    })
     .post("/api/v1/documents/:id/reembed", forward, {
       detail: {
         tags: ["Documents"],

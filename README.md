@@ -254,6 +254,7 @@ For an interactive, browsable version of everything below (with "try it out" aga
 | `GET`  | `/health`                       | Health check                                   |
 | `POST` | `/api/v1/documents`             | Upload and ingest a playbook document          |
 | `GET`  | `/api/v1/documents`             | List all ingested documents, with status       |
+| `GET`  | `/api/v1/documents/:id/chunks`  | List a document's chunks (content, index, embedded status); 404 if not found |
 | `POST` | `/api/v1/documents/:id/reembed` | Re-chunk/re-embed an existing document         |
 | `DELETE` | `/api/v1/documents/:id`       | Delete a document and its chunks (cascades); 404 if not found |
 | `GET`  | `/api/v1/sessions`              | List recent agent sessions                     |

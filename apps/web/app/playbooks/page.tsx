@@ -73,16 +73,35 @@ export default function PlaybooksPage() {
       const result = await listDocuments();
       setDocuments(result);
       setLoadError(null);
+      return result;
     } catch (err) {
       setLoadError(
         err instanceof Error ? err.message : "Failed to reach the backend",
       );
+      return null;
     }
   }, []);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Ingestion status (processing -> ready/failed) is flipped asynchronously
+  // on the backend as embed jobs finish, well after the upload response and
+  // the single post-upload refresh() above return. Poll while any document
+  // is still 'processing' so that transition shows up without a manual
+  // reload; stop as soon as nothing is in flight.
+  useEffect(() => {
+    if (!documents.some((document) => document.status === "processing")) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void refresh();
+    }, 2500);
+
+    return () => window.clearInterval(interval);
+  }, [documents, refresh]);
 
   async function uploadFirstFile(files: FileList | null) {
     const file = files?.[0];
