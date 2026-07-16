@@ -22,6 +22,7 @@
   - [Environment Configuration](#environment-configuration)
   - [Key Design Decisions](#key-design-decisions)
   - [Nix / NixOS](#nix--nixos)
+  - [Local development topology (Nix)](#local-development-topology-nix)
 
 ---
 
@@ -530,6 +531,8 @@ NEXT_PUBLIC_WS_URL=      # Railway WebSocket URL
 | Blue Harbor Health Network (healthcare fit) | 0.6313, 0.5472 (healthcare) | 0.3710, 0.3629 (SaaS) | ≤ 0.0080 |
 | Harlow & Finch (fits neither playbook) | n/a | 0.3190, 0.3170 (SaaS), 0.2816, 0.2509 (healthcare) | ≤ 0.0805 |
 
+The minimum same-playbook (true-positive) score observed was 0.4222; the maximum cross-playbook (false-positive) score observed was 0.3710 — a real, if narrow, gap. `MIN_SIMILARITY_THRESHOLD` was raised from 0.1 to **0.4**, the midpoint of that gap, so retrieval keeps only chunks from the playbook that actually matches the prospect's domain and excludes same-shape-but-wrong-domain playbooks, across every case measured. This is a threshold recalibration against the same hashing embedder, not a fix to the embedder itself — the gap is real but narrow (~0.05), so a sufficiently similar third playbook (e.g. two different SaaS competitor playbooks) could still bleed together at this threshold; a learned semantic embedding remains the actual fix for that class of ambiguity and is still out of scope for this pass.
+
 ---
 
 ## Nix / NixOS
@@ -547,4 +550,21 @@ NEXT_PUBLIC_WS_URL=      # Railway WebSocket URL
 
 **Constraint this doesn't relax:** the flake pins the *toolchain* (bun/node/psql binaries), not the *application dependency graph*. `bun install` inside the shell still hits the live npm registry, unsandboxed by Nix — reproducing `node_modules` exactly (not just the runtime that installs them) is a separate, harder problem this setup doesn't attempt.
 
-The minimum same-playbook (true-positive) score observed was 0.4222; the maximum cross-playbook (false-positive) score observed was 0.3710 — a real, if narrow, gap. `MIN_SIMILARITY_THRESHOLD` was raised from 0.1 to **0.4**, the midpoint of that gap, so retrieval keeps only chunks from the playbook that actually matches the prospect's domain and excludes same-shape-but-wrong-domain playbooks, across every case measured. This is a threshold recalibration against the same hashing embedder, not a fix to the embedder itself — the gap is real but narrow (~0.05), so a sufficiently similar third playbook (e.g. two different SaaS competitor playbooks) could still bleed together at this threshold; a learned semantic embedding remains the actual fix for that class of ambiguity and is still out of scope for this pass.
+---
+
+## Local development topology (Nix)
+
+`flake.nix` also runs Postgres 16 (built as `postgresql_16.withPackages (p: [ p.pgvector ])`) and Redis natively via [process-compose-flake](https://github.com/Platonic-Systems/process-compose-flake)/[services-flake](https://github.com/juspay/services-flake) — `nix run --impure .#services` — so `apps/api` can run against fully local, loopback-bound infrastructure with no Neon or Upstash dependency at all, matching the existing Docker-Compose-based local mode (`compose.local.yml`) but without requiring Docker. Postgres gets a declarative `initialDatabases`/`schemas` step (`nix/postgres-init.sql`) that runs `CREATE EXTENSION IF NOT EXISTS vector;` once, the first time `./.data/postgres` is created — the same extension-enablement step the Neon setup instructions have you run by hand in the Neon SQL editor. Both services' dev passwords are read from the repo-root `.env`'s existing `ARAP_LOCAL_DB_PASSWORD`/`ARAP_LOCAL_REDIS_PASSWORD` (the same variables `compose.local.yml` already reads) via `builtins.getEnv`, which is why starting these services requires `--impure` — Nix's purity model doesn't let a flake read the ambient environment or ungitignored files otherwise, so this is the intentional, narrow escape hatch rather than a literal password committed to `flake.nix`.
+
+Env vars that differ from the hosted (Neon/Upstash) setup, per `apps/api/.env.local.nix-dev`:
+
+| Var | Hosted (`apps/api/.env`) | Nix-local (`apps/api/.env.local.nix-dev`) |
+| --- | --- | --- |
+| `APP_ENV` | `hosted` (default) | `local` — enables `lib/env.ts`'s loopback-only guardrails |
+| `DATABASE_URL` | Neon pooled connection string | `postgres://devuser:<ARAP_LOCAL_DB_PASSWORD>@localhost:5432/revenue_agent` |
+| `REDIS_HOST` / `REDIS_PORT` | Upstash hostname / `6379` | `localhost` / `6379` |
+| `REDIS_PASSWORD` | Upstash secret | `<ARAP_LOCAL_REDIS_PASSWORD>` (same value the Docker-Compose Redis uses) |
+| `REDIS_TLS` | `true` | `false` |
+| `GROQ_API_KEY` / `USE_MOCK_LLM` | unchanged | unchanged — real Groq calls, not mocked, even in this mode |
+
+One local-only quirk worth knowing: services-flake's default `pg_hba.conf` trusts every role over loopback TCP (`host all all 127.0.0.1/32 trust`), so Postgres never actually checks `devuser`'s password — it exists only so `DATABASE_URL` has the same shape hosted Neon expects, and so `lib/env.ts`'s schema (which just requires a non-empty string) is satisfied. Redis's `requirepass`, by contrast, *is* enforced — BullMQ/ioredis really do need the matching `REDIS_PASSWORD`.

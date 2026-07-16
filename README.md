@@ -233,6 +233,41 @@ Interactive API docs: `http://localhost:3001/openapi`
 
 All three are gitignored except `.env`'s and `.env.local`'s `.example` templates — copy one and fill in real values before using it.
 
+### Fully local mode (Nix)
+
+No Docker, no Neon, no Upstash — `flake.nix` runs Postgres 16 (with pgvector) and Redis natively via [services-flake](https://github.com/juspay/services-flake), storing their data under `.data/` (gitignored). Requires the repo-root `.env` from step 1 above (`ARAP_LOCAL_DB_PASSWORD`/`ARAP_LOCAL_REDIS_PASSWORD` — the same file Docker Compose mode uses); flake.nix reads those two variables via `builtins.getEnv`, which is why `--impure` shows up below.
+
+```bash
+# 1. Start Postgres + Redis (foreground — leave this running in its own terminal)
+nix run --impure .#services
+# or: bun run services:nix
+
+# 2. One-time (or after wiping .data/): apply migrations in order
+bun run db:migrate:nix
+
+# 3. Verify pgvector's `<=>` operator works
+psql "postgres://devuser:<ARAP_LOCAL_DB_PASSWORD>@127.0.0.1:5432/revenue_agent" -c \
+  "SELECT '[1,0,0]'::vector(3) <=> '[1,0,0]'::vector(3);"
+# => 0
+
+# 4. Run the backend against the Nix services (separate terminal)
+bun run dev:api:nix
+curl http://localhost:3001/health
+# => {"status":"ok",...}
+
+# 5. Run the test suite against the Nix services
+bun run test:nix
+```
+
+The test suite (`orchestrator.test.ts`) expects at least one playbook already ingested wherever it points — a brand-new `revenue_agent` database has none, so the first `test:nix` run against it will fail one assertion until you upload a sample playbook once via the running API:
+
+```bash
+curl -X POST http://localhost:3001/api/v1/documents \
+  -F "file=@apps/api/fixtures/playbooks/sample-playbook-enterprise-saas.txt"
+```
+
+See [Architecture.md's "Local development topology (Nix)"](./Architecture.md#local-development-topology-nix) for what's actually running under the hood and which env vars differ from the cloud setup.
+
 ---
 
 ## Deployment
