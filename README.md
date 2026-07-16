@@ -221,6 +221,18 @@ Backend API: `http://localhost:3001`
 WebSocket: `ws://localhost:3001/ws/session/:id`  
 Interactive API docs: `http://localhost:3001/openapi`
 
+### 7. Switching between hosted, Docker-local, and Nix-local
+
+`apps/api` picks its backing services from whichever env file you pass to `--env-file`; nothing else needs to change to switch. These three modes never share a database, so a document/session created in one won't show up in another.
+
+| Mode | Env file | Postgres / Redis | Start command |
+| --- | --- | --- | --- |
+| Hosted (Neon/Upstash) | `apps/api/.env` | Cloud | `bun run start:api` / `bun run dev:api` |
+| Docker Compose local | `apps/api/.env.local` | Docker containers (`compose.local.yml`) | `bun run dev:local` |
+| **Nix local** (no Docker) | `apps/api/.env.local.nix-dev` | `nix run --impure .#services` (`flake.nix`) | see [Fully local mode (Nix)](#fully-local-mode-nix) below |
+
+All three are gitignored except `.env`'s and `.env.local`'s `.example` templates — copy one and fill in real values before using it.
+
 ---
 
 ## Deployment
