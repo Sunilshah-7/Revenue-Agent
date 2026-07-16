@@ -139,6 +139,48 @@ documentsRouter.get("/api/v1/documents", async (c) => {
   return c.json({ documents: result.rows });
 });
 
+const chunksParamsSchema = z.object({ id: z.string().uuid() });
+
+// Per-document chunk inspection — chunk_count on GET /api/v1/documents only
+// says how many chunks embedded, not what's actually in them. This exposes
+// the same document_chunks rows a debugging psql session would show, minus
+// the 768-dimension embedding vector itself (not useful to a caller, and
+// large enough per row to bloat the response for no reason); `embedded`
+// stands in for "is embedding IS NOT NULL" instead.
+documentsRouter.get("/api/v1/documents/:id/chunks", async (c) => {
+  let id: string;
+  try {
+    ({ id } = chunksParamsSchema.parse({ id: c.req.param("id") }));
+  } catch {
+    return c.json({ error: "Invalid document id" }, 400);
+  }
+
+  const docResult = await db.query(`SELECT id FROM documents WHERE id = $1`, [
+    id,
+  ]);
+
+  if (docResult.rows.length === 0) {
+    return c.json({ error: "Document not found" }, 404);
+  }
+
+  const chunksResult = await db.query(
+    `
+      SELECT
+        id,
+        chunk_index,
+        content,
+        metadata,
+        (embedding IS NOT NULL) AS embedded
+      FROM document_chunks
+      WHERE doc_id = $1
+      ORDER BY chunk_index
+    `,
+    [id],
+  );
+
+  return c.json({ documentId: id, chunks: chunksResult.rows });
+});
+
 const reembedParamsSchema = z.object({ id: z.string().uuid() });
 
 // Repairs a document that predates ingestion-status tracking, or one that
