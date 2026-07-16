@@ -23,6 +23,7 @@
   - [Key Design Decisions](#key-design-decisions)
   - [Nix / NixOS](#nix--nixos)
   - [Local development topology (Nix)](#local-development-topology-nix)
+  - [Nix packaging](#nix-packaging)
 
 ---
 
@@ -568,3 +569,21 @@ Env vars that differ from the hosted (Neon/Upstash) setup, per `apps/api/.env.lo
 | `GROQ_API_KEY` / `USE_MOCK_LLM` | unchanged | unchanged — real Groq calls, not mocked, even in this mode |
 
 One local-only quirk worth knowing: services-flake's default `pg_hba.conf` trusts every role over loopback TCP (`host all all 127.0.0.1/32 trust`), so Postgres never actually checks `devuser`'s password — it exists only so `DATABASE_URL` has the same shape hosted Neon expects, and so `lib/env.ts`'s schema (which just requires a non-empty string) is satisfied. Redis's `requirepass`, by contrast, *is* enforced — BullMQ/ioredis really do need the matching `REDIS_PASSWORD`.
+
+---
+
+## Nix packaging
+
+`nix build .#api` (or `.#default`) produces a runnable `apps/api` artifact under `./result` with **no network access during the build itself** — a real Nix derivation, not just a pinned dev shell. This closes the gap the previous section called out: the dev shell pins the *toolchain* (bun/node binaries); this pins the *application dependency graph* (`node_modules`) too.
+
+**Approach used: [bun2nix](https://github.com/nix-community/bun2nix)** (`nix-community/bun2nix`, pinned at `2.1.1` in `flake.lock`), not a hand-rolled fixed-output derivation (FOD). `bun2nix -o bun.nix` (run manually, checked in — regenerate whenever `bun.lock` changes) converts the repo's `bun.lock` into `bun.nix`: one `fetchurl` fixed-output derivation per resolved package, each pinned by the integrity hash `bun.lock` already records. `bun2nix`'s `fetchBunDeps` (exposed as `pkgs.bun2nix.fetchBunDeps` via the overlay `flake.nix` adds) turns that into a prebuilt bun install-cache; `pkgs.bun2nix.writeBunApplication` then runs `bun install --linker=isolated --ignore-scripts` against that cache (fully offline — the cache already has everything) and wraps a start script with `makeWrapper`. Chosen over an FOD wrapping the whole `bun install` because bumping one dependency only changes that one `fetchurl` hash instead of invalidating one big manually-maintained output hash — see the chat history for the full fixed-output-derivation tradeoff writeup if bun2nix ever needs replacing.
+
+**Why a wrapper script, not `bun build --compile`:** `bun2nix.mkDerivation`'s default behavior (when a `module` is given) is to compile a single native-ish executable via `bun build --compile`. That was deliberately not used here — Elysia and BullMQ both rely on dynamic `require()` at runtime (BullMQ in particular loads Lua scripts and optional ioredis internals dynamically), which Bun's compiler has had known trouble bundling correctly. Instead, `packages.api` in `flake.nix` calls `pkgs.bun2nix.writeBunApplication` with `dontUseBunBuild = true` and a `startScript` of `cd apps/api && exec bun run src/index.ts` — the store-path `node_modules` gets built, but the app runs through the real `bun` interpreter against real source files, identical to how `bun run dev:api:nix` behaves.
+
+**Known limitations:**
+
+- **Whole-workspace fetch.** `bun.lock` is one lockfile for the entire monorepo (root, `apps/api`, `apps/web`), and `bun2nix` has no per-workspace filtering — `bun.nix` (and therefore `nix build .#api`) fetches and installs `apps/web`'s dependencies (Next.js, React, Tailwind, ...) too, even though this package never runs them. Wasteful on first build (more FODs to fetch/cache) but not a hermeticity problem — every fetch is still individually hash-pinned.
+- **Lifecycle scripts are skipped, not verified safe.** `dontRunLifecycleScripts = true` skips each package's `postinstall`/lifecycle scripts entirely, rather than trusting that none of them reach the network (the sandbox would fail loudly if one did, but failing loudly mid-build is worse than not running them at all for a plain TypeScript service with no native addons in its current dependency set). If a future dependency genuinely needs a native build step, this will need revisiting.
+- **`git add` is required before building.** Nix flakes only see git-tracked/staged content for a local flake source (`src = self;`), not arbitrary working-tree edits — a new or modified file (including `bun.nix` itself after regeneration) must be `git add`ed before `nix build` will pick it up. `flake.lock` is the one exception (Nix reads/writes it directly on disk regardless of git state), which is also why the first `bun2nix` input add auto-updated `flake.lock` on disk without being asked.
+- **`nix flake check` needs `--impure`.** It evaluates every `packages.*` output, including the pre-existing `packages.services` (see above), which reads `ARAP_LOCAL_DB_PASSWORD`/`ARAP_LOCAL_REDIS_PASSWORD` via `builtins.getEnv` — so `nix flake check` alone fails the same way `nix run .#services` does without `--impure`; this predates the `api` package and isn't specific to it.
+- **`checks.api` builds only; it does not run `bun test`.** `apps/api`'s test suite needs a live Postgres and Redis (see `apps/api/package.json`'s `test` script), and the build sandbox has no network or loopback-service access at all — there is no way for anything running inside `nix flake check` to reach a `nix run .#services` process alongside it. Test execution has to stay a separate, explicit step (`bun run test:nix`, after starting services), never something the sandboxed check itself can validate.

@@ -268,6 +268,32 @@ curl -X POST http://localhost:3001/api/v1/documents \
 
 See [Architecture.md's "Local development topology (Nix)"](./Architecture.md#local-development-topology-nix) for what's actually running under the hood and which env vars differ from the cloud setup.
 
+### Building with Nix
+
+`nix build .#api` packages the backend (`apps/api`) as a Nix derivation: no network access during the build, dependencies resolved entirely from the checked-in `bun.nix` (generated from `bun.lock` via [bun2nix](https://github.com/nix-community/bun2nix)). This is separate from `nix run .#services`/the dev workflow above — it's for producing a runnable artifact, not for day-to-day development.
+
+```bash
+# Build (first run fetches ~800 dependency tarballs as fixed-output
+# derivations and caches them in /nix/store; later runs are instant)
+nix build .#api
+
+# ./result is a symlink into /nix/store; run it directly (not via `bun`)
+# Needs the same env vars as `bun run dev:api:nix` -- export them into the
+# shell first, since the wrapper script takes no --env-file flag:
+set -a; source apps/api/.env.local.nix-dev; set +a
+./result/bin/arap-api
+curl http://localhost:3001/health
+```
+
+If `bun.lock` changes, regenerate `bun.nix` and stage both:
+
+```bash
+nix develop --command bun2nix -o bun.nix
+git add bun.lock bun.nix
+```
+
+See [Architecture.md's Nix packaging section](./Architecture.md#nix-packaging) for why this is a wrapper script around `bun run` rather than a `bun build --compile` binary, and for known limitations.
+
 ---
 
 ## Deployment
