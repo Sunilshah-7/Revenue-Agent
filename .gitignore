@@ -12,3 +12,12 @@ CLAUDE.md
 
 # nix-direnv cache
 .direnv/
+
+# nix build result symlink
+result
+
+# Nix-managed local Postgres/Redis data (flake.nix's `nix run .#services`)
+.data/
+
+# Nix-dev local env file (real creds, matches root .env's dev passwords)
+apps/api/.env.local.nix-dev
