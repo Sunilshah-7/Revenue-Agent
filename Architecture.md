@@ -21,6 +21,9 @@
   - [Deployment Architecture](#deployment-architecture)
   - [Environment Configuration](#environment-configuration)
   - [Key Design Decisions](#key-design-decisions)
+  - [Nix / NixOS](#nix--nixos)
+  - [Local development topology (Nix)](#local-development-topology-nix)
+  - [Nix packaging](#nix-packaging)
 
 ---
 
@@ -530,3 +533,57 @@ NEXT_PUBLIC_WS_URL=      # Railway WebSocket URL
 | Harlow & Finch (fits neither playbook) | n/a | 0.3190, 0.3170 (SaaS), 0.2816, 0.2509 (healthcare) | ≤ 0.0805 |
 
 The minimum same-playbook (true-positive) score observed was 0.4222; the maximum cross-playbook (false-positive) score observed was 0.3710 — a real, if narrow, gap. `MIN_SIMILARITY_THRESHOLD` was raised from 0.1 to **0.4**, the midpoint of that gap, so retrieval keeps only chunks from the playbook that actually matches the prospect's domain and excludes same-shape-but-wrong-domain playbooks, across every case measured. This is a threshold recalibration against the same hashing embedder, not a fix to the embedder itself — the gap is real but narrow (~0.05), so a sufficiently similar third playbook (e.g. two different SaaS competitor playbooks) could still bleed together at this threshold; a learned semantic embedding remains the actual fix for that class of ambiguity and is still out of scope for this pass.
+
+---
+
+## Nix / NixOS
+
+`flake.nix` (repo root) provides a reproducible dev shell — `bun`, `nodejs_20`, and `postgresql` (for the `psql` client against Neon) — pinned via `nixpkgs` on the `nixos-unstable` branch, plus `flake-utils` for the multi-system (`eachDefaultSystem`) boilerplate so the same flake works on both macOS and Linux CI. `nix develop` (or `direnv allow`, since `.envrc` contains `use flake` and nix-direnv is wired into the shell) drops you into that shell; the `shellHook` prints the resolved `bun`/`node` versions on entry so the pin is visible, not just assumed.
+
+**Problem this solves:** before this, "install Bun and Node 20" in the README was an instruction, not a guarantee — different contributors (or CI) could end up on different patch versions with no way to notice a drift until something broke in a version-specific way. The flake makes the toolchain itself a checked-in, resolvable artifact.
+
+**`flake.lock` is the part that actually pins anything.** `flake.nix`'s `nixpkgs.url` just says "track the `nixos-unstable` branch" — that's a moving target. `flake.lock` records the exact commit hash (plus a content hash) that `nixos-unstable` resolved to the last time someone ran `nix flake lock` (or `nix develop` for the first time), for both `nixpkgs` and `flake-utils`. Without committing `flake.lock`, every teammate (and CI) would silently resolve `nixos-unstable` to whatever its current HEAD is on the day they run it — the opposite of reproducible. Committing it means `nix develop` gives everyone the identical package set until someone deliberately runs `nix flake update`.
+
+**Tradeoff hit: Bun/Node packaging friction on nixpkgs.** Two distinct issues surfaced setting this up, both worth knowing before treating "it's in nixpkgs" as equivalent to "it's solid":
+
+1. **Bun in nixpkgs is a repackaged prebuilt binary, not built from source.** Bun's own build system is self-hosted (Zig, plus a bootstrapping Bun binary) and isn't practical for nixpkgs to reproduce from source, so the `bun` derivation just fetches and wraps the upstream release binary per platform. The pin guarantees "everyone gets the same bun binary," not "Nix rebuilt Bun reproducibly from source" — it's really nixpkgs acting as a version-pinned, content-hashed download manager for an opaque artifact.
+2. **`nodejs_20` on current `nixos-unstable` is broken, not just deprecated.** Node 20 passed its upstream EOL date, and nixpkgs commit `2600625d0b` (2026-04-20) marked `nodejs_20` as an insecure package. Insecure packages are excluded from Hydra's build farm, so there's no cached binary — allowing it via `permittedInsecurePackages` doesn't unblock a download, it forces a **from-source build**, and that from-source build crashes: clang/LLVM segfaults compiling one of V8's translation units on this machine's toolchain. The fix here was to override just `flake.lock`'s resolved `nixpkgs` input to a pre-2026-04-20 `nixos-unstable` revision (`02d1c9ad58d56732a5ae2412981aca62ac4777fa`, 2026-04-14) via `nix flake lock --override-input nixpkgs github:NixOS/nixpkgs/<rev>` — `nodejs_20` still has a cached binary there. `flake.nix`'s declared `nixpkgs.url` still tracks `nixos-unstable` itself (unchanged), so this is a lock-level pin, not a flake-level one — but it does mean a future `nix flake update` will hit the exact same insecure/from-source-crash problem again if `nodejs_20` is still what's requested at that point, and will need re-resolving the same way (or moving to a newer, non-EOL Node major).
+
+**Constraint this doesn't relax:** the flake pins the *toolchain* (bun/node/psql binaries), not the *application dependency graph*. `bun install` inside the shell still hits the live npm registry, unsandboxed by Nix — reproducing `node_modules` exactly (not just the runtime that installs them) is a separate, harder problem this setup doesn't attempt.
+
+---
+
+## Local development topology (Nix)
+
+`flake.nix` also runs Postgres 16 (built as `postgresql_16.withPackages (p: [ p.pgvector ])`) and Redis natively via [process-compose-flake](https://github.com/Platonic-Systems/process-compose-flake)/[services-flake](https://github.com/juspay/services-flake) — `nix run --impure .#services` — so `apps/api` can run against fully local, loopback-bound infrastructure with no Neon or Upstash dependency at all, matching the existing Docker-Compose-based local mode (`compose.local.yml`) but without requiring Docker. Postgres gets a declarative `initialDatabases`/`schemas` step (`nix/postgres-init.sql`) that runs `CREATE EXTENSION IF NOT EXISTS vector;` once, the first time `./.data/postgres` is created — the same extension-enablement step the Neon setup instructions have you run by hand in the Neon SQL editor. Both services' dev passwords are read from the repo-root `.env`'s existing `ARAP_LOCAL_DB_PASSWORD`/`ARAP_LOCAL_REDIS_PASSWORD` (the same variables `compose.local.yml` already reads) via `builtins.getEnv`, which is why starting these services requires `--impure` — Nix's purity model doesn't let a flake read the ambient environment or ungitignored files otherwise, so this is the intentional, narrow escape hatch rather than a literal password committed to `flake.nix`.
+
+Env vars that differ from the hosted (Neon/Upstash) setup, per `apps/api/.env.local.nix-dev`:
+
+| Var | Hosted (`apps/api/.env`) | Nix-local (`apps/api/.env.local.nix-dev`) |
+| --- | --- | --- |
+| `APP_ENV` | `hosted` (default) | `local` — enables `lib/env.ts`'s loopback-only guardrails |
+| `DATABASE_URL` | Neon pooled connection string | `postgres://devuser:<ARAP_LOCAL_DB_PASSWORD>@localhost:5432/revenue_agent` |
+| `REDIS_HOST` / `REDIS_PORT` | Upstash hostname / `6379` | `localhost` / `6379` |
+| `REDIS_PASSWORD` | Upstash secret | `<ARAP_LOCAL_REDIS_PASSWORD>` (same value the Docker-Compose Redis uses) |
+| `REDIS_TLS` | `true` | `false` |
+| `GROQ_API_KEY` / `USE_MOCK_LLM` | unchanged | unchanged — real Groq calls, not mocked, even in this mode |
+
+One local-only quirk worth knowing: services-flake's default `pg_hba.conf` trusts every role over loopback TCP (`host all all 127.0.0.1/32 trust`), so Postgres never actually checks `devuser`'s password — it exists only so `DATABASE_URL` has the same shape hosted Neon expects, and so `lib/env.ts`'s schema (which just requires a non-empty string) is satisfied. Redis's `requirepass`, by contrast, *is* enforced — BullMQ/ioredis really do need the matching `REDIS_PASSWORD`.
+
+---
+
+## Nix packaging
+
+`nix build .#api` (or `.#default`) produces a runnable `apps/api` artifact under `./result` with **no network access during the build itself** — a real Nix derivation, not just a pinned dev shell. This closes the gap the previous section called out: the dev shell pins the *toolchain* (bun/node binaries); this pins the *application dependency graph* (`node_modules`) too.
+
+**Approach used: [bun2nix](https://github.com/nix-community/bun2nix)** (`nix-community/bun2nix`, pinned at `2.1.1` in `flake.lock`), not a hand-rolled fixed-output derivation (FOD). `bun2nix -o bun.nix` (run manually, checked in — regenerate whenever `bun.lock` changes) converts the repo's `bun.lock` into `bun.nix`: one `fetchurl` fixed-output derivation per resolved package, each pinned by the integrity hash `bun.lock` already records. `bun2nix`'s `fetchBunDeps` (exposed as `pkgs.bun2nix.fetchBunDeps` via the overlay `flake.nix` adds) turns that into a prebuilt bun install-cache; `pkgs.bun2nix.writeBunApplication` then runs `bun install --linker=isolated --ignore-scripts` against that cache (fully offline — the cache already has everything) and wraps a start script with `makeWrapper`. Chosen over an FOD wrapping the whole `bun install` because bumping one dependency only changes that one `fetchurl` hash instead of invalidating one big manually-maintained output hash — see the chat history for the full fixed-output-derivation tradeoff writeup if bun2nix ever needs replacing.
+
+**Why a wrapper script, not `bun build --compile`:** `bun2nix.mkDerivation`'s default behavior (when a `module` is given) is to compile a single native-ish executable via `bun build --compile`. That was deliberately not used here — Elysia and BullMQ both rely on dynamic `require()` at runtime (BullMQ in particular loads Lua scripts and optional ioredis internals dynamically), which Bun's compiler has had known trouble bundling correctly. Instead, `packages.api` in `flake.nix` calls `pkgs.bun2nix.writeBunApplication` with `dontUseBunBuild = true` and a `startScript` of `cd apps/api && exec bun run src/index.ts` — the store-path `node_modules` gets built, but the app runs through the real `bun` interpreter against real source files, identical to how `bun run dev:api:nix` behaves.
+
+**Known limitations:**
+
+- **Whole-workspace fetch.** `bun.lock` is one lockfile for the entire monorepo (root, `apps/api`, `apps/web`), and `bun2nix` has no per-workspace filtering — `bun.nix` (and therefore `nix build .#api`) fetches and installs `apps/web`'s dependencies (Next.js, React, Tailwind, ...) too, even though this package never runs them. Wasteful on first build (more FODs to fetch/cache) but not a hermeticity problem — every fetch is still individually hash-pinned.
+- **Lifecycle scripts are skipped, not verified safe.** `dontRunLifecycleScripts = true` skips each package's `postinstall`/lifecycle scripts entirely, rather than trusting that none of them reach the network (the sandbox would fail loudly if one did, but failing loudly mid-build is worse than not running them at all for a plain TypeScript service with no native addons in its current dependency set). If a future dependency genuinely needs a native build step, this will need revisiting.
+- **`git add` is required before building.** Nix flakes only see git-tracked/staged content for a local flake source (`src = self;`), not arbitrary working-tree edits — a new or modified file (including `bun.nix` itself after regeneration) must be `git add`ed before `nix build` will pick it up. `flake.lock` is the one exception (Nix reads/writes it directly on disk regardless of git state), which is also why the first `bun2nix` input add auto-updated `flake.lock` on disk without being asked.
+- **`nix flake check` needs `--impure`.** It evaluates every `packages.*` output, including the pre-existing `packages.services` (see above), which reads `ARAP_LOCAL_DB_PASSWORD`/`ARAP_LOCAL_REDIS_PASSWORD` via `builtins.getEnv` — so `nix flake check` alone fails the same way `nix run .#services` does without `--impure`; this predates the `api` package and isn't specific to it.
+- **`checks.api` builds only; it does not run `bun test`.** `apps/api`'s test suite needs a live Postgres and Redis (see `apps/api/package.json`'s `test` script), and the build sandbox has no network or loopback-service access at all — there is no way for anything running inside `nix flake check` to reach a `nix run .#services` process alongside it. Test execution has to stay a separate, explicit step (`bun run test:nix`, after starting services), never something the sandboxed check itself can validate.

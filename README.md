@@ -78,6 +78,8 @@ ai-revenue-agent/
 - [Node.js](https://nodejs.org) v20+ (for tooling)
 - Accounts on: [Neon](https://neon.tech), [Upstash](https://upstash.com), [Groq](https://console.groq.com), [Vercel](https://vercel.com), [Railway](https://railway.com)
 
+**With [Nix](https://nixos.org) (recommended):** `flake.nix` pins Bun, Node 20, and the `psql` client to exact versions, so you get the same toolchain as everyone else without installing anything globally. See [Nix / NixOS](./Architecture.md#nix--nixos) in Architecture.md for how it works.
+
 ---
 
 ## Local Development
@@ -87,7 +89,20 @@ ai-revenue-agent/
 ```bash
 git clone https://github.com/your-username/ai-revenue-agent.git
 cd ai-revenue-agent
+```
 
+**With Nix (recommended):**
+
+```bash
+nix develop   # or: direnv allow, if you use direnv — see flake.nix
+
+cd apps/web && bun install
+cd ../api && bun install
+```
+
+**Without Nix (manual fallback):** install Bun v1.1+ and Node.js v20+ yourself, then:
+
+```bash
 # Install frontend deps
 cd apps/web && bun install
 
@@ -205,6 +220,79 @@ Frontend: `http://localhost:3000`
 Backend API: `http://localhost:3001`  
 WebSocket: `ws://localhost:3001/ws/session/:id`  
 Interactive API docs: `http://localhost:3001/openapi`
+
+### 7. Switching between hosted, Docker-local, and Nix-local
+
+`apps/api` picks its backing services from whichever env file you pass to `--env-file`; nothing else needs to change to switch. These three modes never share a database, so a document/session created in one won't show up in another.
+
+| Mode | Env file | Postgres / Redis | Start command |
+| --- | --- | --- | --- |
+| Hosted (Neon/Upstash) | `apps/api/.env` | Cloud | `bun run start:api` / `bun run dev:api` |
+| Docker Compose local | `apps/api/.env.local` | Docker containers (`compose.local.yml`) | `bun run dev:local` |
+| **Nix local** (no Docker) | `apps/api/.env.local.nix-dev` | `nix run --impure .#services` (`flake.nix`) | see [Fully local mode (Nix)](#fully-local-mode-nix) below |
+
+All three are gitignored except `.env`'s and `.env.local`'s `.example` templates — copy one and fill in real values before using it.
+
+### Fully local mode (Nix)
+
+No Docker, no Neon, no Upstash — `flake.nix` runs Postgres 16 (with pgvector) and Redis natively via [services-flake](https://github.com/juspay/services-flake), storing their data under `.data/` (gitignored). Requires the repo-root `.env` from step 1 above (`ARAP_LOCAL_DB_PASSWORD`/`ARAP_LOCAL_REDIS_PASSWORD` — the same file Docker Compose mode uses); flake.nix reads those two variables via `builtins.getEnv`, which is why `--impure` shows up below.
+
+```bash
+# 1. Start Postgres + Redis (foreground — leave this running in its own terminal)
+nix run --impure .#services
+# or: bun run services:nix
+
+# 2. One-time (or after wiping .data/): apply migrations in order
+bun run db:migrate:nix
+
+# 3. Verify pgvector's `<=>` operator works
+psql "postgres://devuser:<ARAP_LOCAL_DB_PASSWORD>@127.0.0.1:5432/revenue_agent" -c \
+  "SELECT '[1,0,0]'::vector(3) <=> '[1,0,0]'::vector(3);"
+# => 0
+
+# 4. Run the backend against the Nix services (separate terminal)
+bun run dev:api:nix
+curl http://localhost:3001/health
+# => {"status":"ok",...}
+
+# 5. Run the test suite against the Nix services
+bun run test:nix
+```
+
+The test suite (`orchestrator.test.ts`) expects at least one playbook already ingested wherever it points — a brand-new `revenue_agent` database has none, so the first `test:nix` run against it will fail one assertion until you upload a sample playbook once via the running API:
+
+```bash
+curl -X POST http://localhost:3001/api/v1/documents \
+  -F "file=@apps/api/fixtures/playbooks/sample-playbook-enterprise-saas.txt"
+```
+
+See [Architecture.md's "Local development topology (Nix)"](./Architecture.md#local-development-topology-nix) for what's actually running under the hood and which env vars differ from the cloud setup.
+
+### Building with Nix
+
+`nix build .#api` packages the backend (`apps/api`) as a Nix derivation: no network access during the build, dependencies resolved entirely from the checked-in `bun.nix` (generated from `bun.lock` via [bun2nix](https://github.com/nix-community/bun2nix)). This is separate from `nix run .#services`/the dev workflow above — it's for producing a runnable artifact, not for day-to-day development.
+
+```bash
+# Build (first run fetches ~800 dependency tarballs as fixed-output
+# derivations and caches them in /nix/store; later runs are instant)
+nix build .#api
+
+# ./result is a symlink into /nix/store; run it directly (not via `bun`)
+# Needs the same env vars as `bun run dev:api:nix` -- export them into the
+# shell first, since the wrapper script takes no --env-file flag:
+set -a; source apps/api/.env.local.nix-dev; set +a
+./result/bin/arap-api
+curl http://localhost:3001/health
+```
+
+If `bun.lock` changes, regenerate `bun.nix` and stage both:
+
+```bash
+nix develop --command bun2nix -o bun.nix
+git add bun.lock bun.nix
+```
+
+See [Architecture.md's Nix packaging section](./Architecture.md#nix-packaging) for why this is a wrapper script around `bun run` rather than a `bun build --compile` binary, and for known limitations.
 
 ---
 
